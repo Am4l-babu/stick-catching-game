@@ -15,10 +15,21 @@ Six sticks hang from six servo-driven hooks. Press **START**, wait through the c
 
 The ESP8266 also creates its own Wi-Fi network, so you can start the game, stop it, tune the timing and calibrate every servo from your phone. No router or internet needed.
 
+<p align="center">
+  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html">
+    <img src="docs/simulator-preview.png" alt="Stick Catcher browser simulator: six servo hooks dropping glowing sticks, a phone-style control panel and a live serial monitor" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html"><b>▶ Play the simulator in your browser</b></a> · no hardware needed
+</p>
+
 ---
 
 ## Table of contents
 
+- [Try it in your browser](#-try-it-in-your-browser)
 - [How to play](#-how-to-play)
 - [Features](#-features)
 - [Hardware](#-hardware)
@@ -35,6 +46,24 @@ The ESP8266 also creates its own Wi-Fi network, so you can start the game, stop 
 - [Project structure](#-project-structure)
 - [Troubleshooting](#-troubleshooting)
 - [License](#-license)
+
+---
+
+## 🕹 Try it in your browser
+
+Want to see the game before you build it? Open the **[interactive simulator](https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html)**. It is a single self-contained page ([`docs/simulator.html`](docs/simulator.html)) that runs the same state machine as the firmware, so what you see matches what the hardware does.
+
+| | |
+| --- | --- |
+| 🎯 **Play it** | Click a falling stick, tap a lane, or press **1** to **6** to catch it. Press **Space** for the START button and **Esc** to stop. |
+| 🦾 **Live servos** | Six animated hooks driven by the real HOLD/RELEASE angles. Drag the sliders and watch the horns move. |
+| 📱 **The real web panel** | The phone on the right mirrors the control panel served at `192.168.4.1`, with the same sliders, buttons and status text. |
+| 🖥 **Serial monitor** | Prints the same messages as the firmware (`Releasing STICK 3`, `Next stick after 1240 ms`, …). |
+| 📊 **Scoreboard** | Reaction time per stick, average, fastest, letter grade and a saved personal best. |
+| 🤖 **Bot mode** | Turn on the auto-play bot and watch a round play itself. |
+| 🧪 **Learn by breaking it** | Set RELEASE within 20° of HOLD and the hooks **JAM**, just like a badly calibrated build. Shorten the drop height for a harder game. |
+
+Prefer to run it locally? Open `docs/simulator.html` in any browser, or add `?demo=1` to the address to let the bot play a round automatically. You can also enable [GitHub Pages](https://docs.github.com/pages) on the `docs/` folder to host it at your own URL.
 
 ---
 
@@ -70,6 +99,7 @@ Press **■ STOP / RESET** at any time to abort a round and return every hook to
 - 🧪 **Servo test mode.** Fire any single hook from the web panel to check your mechanics.
 - 🔧 **Standalone servo test sketch.** Check wiring and find your servo limits from the serial monitor before running the game.
 - 🖥 **Serial log.** Everything the game does is printed at 115200 baud.
+- 🕹 **Browser simulator.** Play and explore the game without any hardware.
 - 🧩 **Non-blocking state machine.** Web requests keep being served while a round is running.
 
 ---
@@ -359,6 +389,9 @@ stick-catching-game/
 │   └── servo_test.ino
 ├── pio/
 │   └── servo_test_entry.cpp        ← lets PlatformIO build servo_test
+├── docs/
+│   ├── simulator.html              ← interactive browser simulator
+│   └── simulator-preview.png       ← screenshot used in this README
 ├── platformio.ini                  ← PlatformIO build config (VS Code / CLI)
 ├── .vscode/
 │   └── extensions.json             ← recommends the PlatformIO extension

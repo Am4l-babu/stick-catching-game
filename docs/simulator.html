@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stick Catcher · Simulator</title>
+<meta name="description" content="Play the Stick Catcher game in your browser. Same state machine, timing and web panel as the ESP8266 firmware.">
+<style>
+:root{
+  --bg:#070a14; --bg2:#0b1020; --panel:#0f1528; --panel2:#151d36; --line:#232e54;
+  --text:#e9edfc; --muted:#8a94b8; --accent:#7c5cff; --accent2:#22d3ee;
+  --good:#4ade80; --warn:#fbbf24; --bad:#fb7185;
+  --c1:#ff5d73; --c2:#ffb84d; --c3:#ffe66d; --c4:#4ade80; --c5:#38bdf8; --c6:#a78bfa;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  --sans:ui-rounded,"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:dark}
+body{
+  margin:0;font-family:var(--sans);color:var(--text);min-height:100vh;
+  background:
+    radial-gradient(900px 500px at 8% -10%,rgba(124,92,255,.22),transparent 60%),
+    radial-gradient(800px 500px at 100% 0%,rgba(34,211,238,.14),transparent 60%),
+    linear-gradient(var(--bg),var(--bg2));
+  background-attachment:fixed;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
+  background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+  background-size:44px 44px;mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 75%);
+  -webkit-mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 75%);
+}
+button{font-family:inherit}
+a{color:var(--accent2)}
+
+/* ---------- header ---------- */
+.top{max-width:1360px;margin:0 auto;padding:22px 20px 8px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:relative}
+.logo{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;font-size:28px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 30px rgba(124,92,255,.45)}
+.top h1{margin:0;font-size:26px;letter-spacing:.18em;font-weight:800}
+.top p{margin:2px 0 0;color:var(--muted);font-size:14px}
+.top .grow{flex:1}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(21,29,54,.7);color:var(--text);font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;backdrop-filter:blur(6px)}
+.chip:hover{border-color:var(--accent)}
+.chip[aria-pressed="false"]{opacity:.55}
+
+/* ---------- layout ---------- */
+.layout{max-width:1360px;margin:0 auto;padding:12px 20px 40px;display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:24px;align-items:start;position:relative}
+.left{display:flex;flex-direction:column;gap:20px;min-width:0}
+.card{background:linear-gradient(180deg,rgba(21,29,54,.92),rgba(13,19,38,.92));border:1px solid var(--line);border-radius:22px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
+
+/* ---------- stage ---------- */
+.stage-bar{display:flex;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:.06em;
+  background:#0a1022;border:1px solid var(--line);color:var(--muted);font-family:var(--mono)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.pill.state{color:var(--text)}
+.pill.state .dot{background:var(--good);box-shadow:0 0 10px var(--good)}
+.pill.state[data-s="COUNTDOWN"] .dot{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+.pill.state[data-s="RELEASE_STICK"] .dot,.pill.state[data-s="BETWEEN_STICKS"] .dot{background:var(--bad);box-shadow:0 0 10px var(--bad);animation:blink .6s infinite}
+.pill.state[data-s="RESETTING"] .dot{background:var(--accent2);box-shadow:0 0 10px var(--accent2)}
+@keyframes blink{50%{opacity:.25}}
+.stage-bar .grow{flex:1}
+.stage-wrap{position:relative;background:radial-gradient(ellipse at 50% 0%,#141c3a 0%,#0a0f20 70%)}
+#stage{display:block;width:100%;aspect-ratio:960/520;touch-action:manipulation;cursor:crosshair}
+.toast{position:absolute;left:50%;top:14px;transform:translateX(-50%) translateY(-10px);padding:8px 16px;border-radius:999px;
+  background:rgba(251,191,36,.16);border:1px solid rgba(251,191,36,.5);color:var(--warn);font-size:13px;font-weight:700;opacity:0;
+  transition:.25s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* round summary overlay */
+.summary{position:absolute;inset:0;display:grid;place-items:center;background:rgba(5,8,18,.62);backdrop-filter:blur(3px);
+  opacity:0;pointer-events:none;transition:opacity .3s}
+.summary.show{opacity:1;pointer-events:auto}
+.sum-card{width:min(420px,88%);padding:26px 26px 22px;text-align:center;border-radius:24px;border:1px solid var(--line);
+  background:linear-gradient(180deg,#151d38,#0d1327);box-shadow:0 30px 80px rgba(0,0,0,.6);transform:scale(.92);transition:transform .35s cubic-bezier(.2,1.4,.4,1)}
+.summary.show .sum-card{transform:scale(1)}
+.sum-card small{letter-spacing:.3em;color:var(--muted);font-weight:700;font-size:11px}
+.grade{font-size:92px;line-height:1;font-weight:900;margin:6px 0 4px;background:linear-gradient(135deg,var(--accent2),var(--accent));
+  -webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 6px 24px rgba(124,92,255,.5))}
+.sum-line{font-size:18px;font-weight:700}
+.sum-sub{color:var(--muted);font-size:14px;margin-top:6px}
+.badge-new{display:inline-block;margin-top:10px;padding:4px 12px;border-radius:999px;background:rgba(74,222,128,.15);color:var(--good);
+  border:1px solid rgba(74,222,128,.5);font-size:12px;font-weight:800;letter-spacing:.08em}
+.sum-actions{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+
+/* controller strip */
+.strip{display:flex;align-items:center;gap:20px;padding:16px 18px;border-top:1px solid var(--line);flex-wrap:wrap;background:rgba(7,10,20,.4)}
+.hw{display:flex;align-items:center;gap:14px}
+.hwbtn{width:74px;height:74px;border-radius:50%;border:0;cursor:pointer;position:relative;color:#052e16;font-weight:900;font-size:13px;letter-spacing:.08em;
+  background:radial-gradient(circle at 35% 30%,#86efac,#22c55e 55%,#15803d);
+  box-shadow:0 0 0 6px #10182f,0 0 0 8px #263259,0 10px 0 #0f5f2c,0 16px 26px rgba(0,0,0,.55),0 0 34px rgba(74,222,128,.35);
+  transition:transform .08s,box-shadow .08s}
+.hwbtn:active,.hwbtn.down{transform:translateY(8px);box-shadow:0 0 0 6px #10182f,0 0 0 8px #263259,0 2px 0 #0f5f2c,0 4px 10px rgba(0,0,0,.55),0 0 34px rgba(74,222,128,.35)}
+.hwbtn:disabled{filter:grayscale(.7) brightness(.6);cursor:not-allowed;box-shadow:0 0 0 6px #10182f,0 0 0 8px #263259,0 10px 0 #33463b,0 16px 26px rgba(0,0,0,.55)}
+.hwtxt b{display:block;font-size:14px}
+.hwtxt span{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.keys{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.key{width:52px;height:56px;border-radius:14px;border:1px solid var(--line);background:#0b1124;color:var(--text);cursor:pointer;font-weight:800;font-size:18px;
+  position:relative;transition:transform .08s,background .15s;display:grid;place-items:center;line-height:1}
+.key small{position:absolute;bottom:5px;font-size:8px;letter-spacing:.14em;color:var(--muted);font-weight:700}
+.key::before{content:"";position:absolute;left:8px;right:8px;top:0;height:3px;border-radius:0 0 4px 4px;background:var(--kc)}
+.key:active,.key.hit{transform:translateY(3px);background:#182146}
+.keyhint{width:100%;font-size:12px;color:var(--muted);margin:0}
+
+/* scoreboard */
+.score{padding:18px}
+.score h2,.serial h2,.sim-card h2{margin:0 0 12px;font-size:12px;letter-spacing:.24em;color:var(--muted);font-weight:800}
+.slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.slot{background:#0a1022;border:1px solid var(--line);border-radius:14px;padding:10px 10px 12px;position:relative;overflow:hidden;min-width:0}
+.slot::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc)}
+.slot .n{font-size:11px;letter-spacing:.14em;color:var(--muted);font-weight:800;padding-left:6px}
+.slot .v{font-size:18px;font-weight:800;margin:4px 0 8px;padding-left:6px;font-family:var(--mono);white-space:nowrap}
+.slot .bar{height:6px;border-radius:6px;background:#141c38;margin-left:6px;overflow:hidden}
+.slot .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--good),var(--warn),var(--bad));border-radius:6px;transition:width .4s}
+.slot.caught .v{color:var(--good)} .slot.missed .v{color:var(--bad)} .slot.jam .v{color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+.stat{background:linear-gradient(180deg,#111a35,#0c1226);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.stat b{display:block;font-size:22px;font-family:var(--mono);margin-top:2px}
+.stat span{font-size:11px;letter-spacing:.14em;color:var(--muted);font-weight:800}
+
+/* serial monitor */
+.serial{padding:0}
+.serial-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:#0a0f1f}
+.serial-head .lights{display:flex;gap:6px}
+.serial-head .lights i{width:11px;height:11px;border-radius:50%;background:#ff5f57}
+.serial-head .lights i:nth-child(2){background:#febc2e}.serial-head .lights i:nth-child(3){background:#28c840}
+.serial-head h2{margin:0;flex:1;text-align:center;letter-spacing:.08em;font-size:12px}
+.tiny{border:1px solid var(--line);background:#0b1124;color:var(--muted);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:700}
+.tiny:hover{color:var(--text);border-color:var(--accent)}
+#log{margin:0;height:230px;overflow:auto;padding:12px 16px;background:#060a14;font-family:var(--mono);font-size:12.5px;line-height:1.5;color:#b8c2e6;white-space:pre-wrap;word-break:break-word}
+#log .b{color:var(--accent2)} #log .g{color:var(--good);font-weight:700} #log .r{color:var(--warn)} #log .e{color:var(--bad)} #log .d{color:var(--muted)}
+
+/* ---------- phone ---------- */
+.right{position:sticky;top:16px;display:flex;flex-direction:column;gap:18px}
+.phone{border-radius:44px;padding:11px;background:linear-gradient(160deg,#2a355f,#141b36);box-shadow:0 30px 80px rgba(0,0,0,.6),inset 0 0 0 2px #39467a}
+.screen{background:#101010;border-radius:34px;overflow:hidden;position:relative}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:92px;height:22px;border-radius:14px;background:#000;z-index:2}
+.statusbar{display:flex;justify-content:space-between;padding:10px 24px 4px;font-size:12px;font-weight:700;color:#cfd6f5}
+.urlbar{margin:6px 14px 8px;padding:8px 12px;border-radius:12px;background:#1d1d1d;color:#cbd2ee;font-size:12.5px;display:flex;align-items:center;gap:8px;font-family:var(--mono)}
+.urlbar svg{flex:none}
+.pscroll{max-height:640px;overflow:auto;padding:4px 14px 20px;scrollbar-width:thin;scrollbar-color:#333 transparent}
+.pscroll h1{text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:24px;margin:8px 0 14px;letter-spacing:.02em}
+.pcard{background:#202020;padding:16px;margin:12px 0;border-radius:15px;font-family:Arial,Helvetica,sans-serif}
+.pcard h2{margin:0 0 6px;font-size:18px}
+.pstatus{text-align:center;font-size:20px;padding:15px;background:#151515;border-radius:10px;min-height:56px}
+.pstatus span{font-weight:700;color:#7dd3fc}
+.pb{width:100%;padding:15px;margin-top:10px;border:0;border-radius:10px;font-size:18px;font-weight:700;color:#fff;cursor:pointer;transition:filter .15s,transform .08s;font-family:Arial,Helvetica,sans-serif}
+.pb:hover{filter:brightness(1.12)} .pb:active{transform:scale(.98)} .pb:disabled{filter:grayscale(.8) brightness(.6);cursor:not-allowed}
+.pb.start{background:#16a34a}.pb.stop{background:#dc2626}.pb.test{background:#2563eb;font-size:15px;padding:12px}.pb.save{background:#9333ea}
+.pgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.pgrid .pb{margin-top:0}
+.pcard label{display:block;margin-top:14px;font-size:15px}
+.pcard input[type=range]{width:100%;accent-color:#9333ea;margin:6px 0 0}
+.val{color:#00ff99;font-weight:700}
+.note{font-size:11.5px;color:#9a9a9a;margin:10px 0 0;line-height:1.4}
+
+.sim-card{padding:18px}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.opt:first-of-type{border-top:0}
+.opt small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.sw{position:relative;width:46px;height:26px;flex:none}
+.sw input{appearance:none;-webkit-appearance:none;width:46px;height:26px;border-radius:99px;background:#1c2547;border:1px solid var(--line);cursor:pointer;margin:0;transition:.2s}
+.sw input::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#8a94b8;transition:.2s}
+.sw input:checked{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent}
+.sw input:checked::after{left:23px;background:#fff}
+.simrange{display:block;width:100%;accent-color:var(--accent);margin-top:8px}
+.badge{font-size:10px;letter-spacing:.14em;padding:2px 8px;border-radius:99px;background:rgba(124,92,255,.18);color:#b7a6ff;font-weight:800;margin-left:8px;vertical-align:middle}
+
+footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);font-size:13px;line-height:1.6}
+#err{display:none}
+
+@media (max-width:1040px){
+  .layout{grid-template-columns:1fr}
+  .right{position:static;max-width:440px;width:100%;margin:0 auto}
+  .pscroll{max-height:none}
+}
+@media (max-width:640px){
+  .top{padding-top:16px}.top h1{font-size:20px}
+  .slots{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .keys{margin-left:0;width:100%;justify-content:space-between}
+  .key{flex:1;width:auto}
+  .layout{padding:8px 12px 30px}.top{padding-left:12px;padding-right:12px}
+  .sum-card{padding:12px 14px 12px;width:92%;border-radius:18px}
+  .sum-card small{font-size:9px}
+  .grade{font-size:46px;margin:0}
+  .sum-line{font-size:15px}.sum-sub{font-size:12px;margin-top:2px}
+  .badge-new{margin-top:6px;padding:2px 10px;font-size:10px}
+  .sum-actions{margin-top:10px}
+  .sum-actions .pb,.sum-actions .tiny{padding:8px 16px!important;font-size:14px!important}
+  .hw{width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="logo" aria-hidden="true">🎯</div>
+  <div>
+    <h1>STICK CATCHER</h1>
+    <p>Interactive simulator · runs the same state machine as the ESP8266 firmware</p>
+  </div>
+  <div class="grow"></div>
+  <button class="chip" id="soundBtn" aria-pressed="true" title="Toggle sound">🔊 Sound</button>
+  <a class="chip" href="https://github.com/Am4l-babu/stick-catching-game" target="_blank" rel="noopener">⭐ GitHub</a>
+</header>
+
+<main class="layout">
+  <section class="left">
+
+    <!-- ======================= STAGE ======================= -->
+    <div class="card">
+      <div class="stage-bar">
+        <span class="pill state" id="statePill" data-s="WAITING"><span class="dot"></span><span id="stateName">WAITING</span></span>
+        <span class="pill"><span class="dot" style="background:var(--good)"></span>PCA9685 · 0x40</span>
+        <span class="pill"><span class="dot" style="background:var(--accent2)"></span>AP · STICK-CATCHER</span>
+        <span class="grow"></span>
+        <span class="pill" id="fallPill">fall time · 0.45 s</span>
+      </div>
+
+      <div class="stage-wrap">
+        <canvas id="stage" width="960" height="520" aria-label="Six servo hooks each holding a stick. Click or press 1 to 6 to catch a falling stick."></canvas>
+        <div class="toast" id="toast"></div>
+        <div class="summary" id="summary" role="dialog" aria-label="Round summary">
+          <div class="sum-card">
+            <small>ROUND COMPLETE</small>
+            <div class="grade" id="sumGrade">A</div>
+            <div class="sum-line" id="sumLine">5 / 6 caught</div>
+            <div class="sum-sub" id="sumSub">average 312 ms · fastest 241 ms</div>
+            <div id="sumBadge"></div>
+            <div class="sum-actions">
+              <button class="pb start" style="width:auto;padding:12px 22px;margin:0" id="sumAgain">▶ Play again</button>
+              <button class="tiny" id="sumClose" style="padding:12px 18px;font-size:13px">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="hw">
+          <button class="hwbtn" id="hwStart" title="Physical START button on D5 (GPIO14). Shortcut: Space">START</button>
+          <div class="hwtxt"><b>Physical START button</b><span>D5 · GPIO14 → GND · Space</span></div>
+        </div>
+        <div class="keys" id="keys"></div>
+        <p class="keyhint">Catch a falling stick by <b>clicking it</b>, tapping a lane, pressing <b>1–6</b>, or hitting the number buttons. <b>Esc</b> = stop / reset.</p>
+      </div>
+    </div>
+
+    <!-- ======================= SCOREBOARD ======================= -->
+    <div class="card score">
+      <h2>SCOREBOARD</h2>
+      <div class="slots" id="slots"></div>
+      <div class="stats">
+        <div class="stat"><span>CAUGHT</span><b id="stCaught">–</b></div>
+        <div class="stat"><span>AVG REACTION</span><b id="stAvg">–</b></div>
+        <div class="stat"><span>FASTEST</span><b id="stFast">–</b></div>
+        <div class="stat"><span>BEST AVG (SAVED)</span><b id="stBest">–</b></div>
+      </div>
+    </div>
+
+    <!-- ======================= SERIAL ======================= -->
+    <div class="card serial">
+      <div class="serial-head">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <h2>SERIAL MONITOR · 115200 BAUD</h2>
+        <button class="tiny" id="clearLog">Clear</button>
+      </div>
+      <div id="log" role="log" aria-live="off"></div>
+    </div>
+  </section>
+
+  <!-- ======================= PHONE ======================= -->
+  <aside class="right">
+    <div class="phone">
+      <div class="screen">
+        <div class="notch"></div>
+        <div class="statusbar"><span>9:41</span><span>▂▄▆█ 100%</span></div>
+        <div class="urlbar">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa3c7" stroke-width="2.4" stroke-linecap="round"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="#9aa3c7"/></svg>
+          <span>http://192.168.4.1</span>
+        </div>
+
+        <div class="pscroll">
+          <h1>🎯 STICK CATCHER</h1>
+
+          <div class="pcard">
+            <div class="pstatus" aria-live="polite">Status: <span id="status">WAITING</span></div>
+            <button class="pb start" id="btnStart">▶ START GAME</button>
+            <button class="pb stop" id="btnStop">■ STOP / RESET</button>
+          </div>
+
+          <div class="pcard">
+            <h2>⏱ Timing</h2>
+            <label>Start delay: <span class="val" id="startValue">5000 ms</span></label>
+            <input type="range" id="startDelay" min="1000" max="15000" step="500" value="5000">
+            <label>Minimum random delay: <span class="val" id="minValue">500 ms</span></label>
+            <input type="range" id="minDelay" min="100" max="5000" step="100" value="500">
+            <label>Maximum random delay: <span class="val" id="maxValue">2000 ms</span></label>
+            <input type="range" id="maxDelay" min="200" max="10000" step="100" value="2000">
+            <label>Servo release time: <span class="val" id="releaseValue">200 ms</span></label>
+            <input type="range" id="releaseTime" min="50" max="1000" step="10" value="200">
+            <p class="note">On the real panel you press <b>SAVE TIMING</b>. Here the sliders apply instantly.</p>
+          </div>
+
+          <div class="pcard">
+            <h2>⚙ Servo Angles</h2>
+            <label>HOLD angle: <span class="val" id="holdValue">0°</span></label>
+            <input type="range" id="holdAngle" min="0" max="180" value="0">
+            <label>RELEASE angle: <span class="val" id="releaseAngleValue">90°</span></label>
+            <input type="range" id="releaseAngle" min="0" max="180" value="90">
+            <p class="note">Watch the servo horns on the stage. If RELEASE is within 20° of HOLD the hook never lets go, and the round reports a <b>JAM</b>.</p>
+          </div>
+
+          <div class="pcard">
+            <h2>🧪 Test Individual Servos</h2>
+            <div class="pgrid" id="tests"></div>
+            <p class="note">Fires one hook and returns it. The stick really falls, so you can practise catching.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card sim-card">
+      <h2>SIMULATOR OPTIONS <span class="badge">SIM ONLY</span></h2>
+      <div class="opt" style="display:block">
+        <div style="display:flex;justify-content:space-between"><span>Drop height</span><b id="dropOut" style="font-family:var(--mono)">100 cm</b></div>
+        <small>Distance the stick falls. Shorter drop = less time to catch.</small>
+        <input class="simrange" type="range" id="dropHeight" min="30" max="200" step="5" value="100">
+      </div>
+      <div class="opt">
+        <div>🤖 Auto-play bot<small>Watch a simulated player (~280 ms reactions, sometimes misses)</small></div>
+        <label class="sw"><input type="checkbox" id="bot"></label>
+      </div>
+      <div class="opt">
+        <div>🙈 Reveal random order<small>Prints the shuffled order in the serial log (spoiler!)</small></div>
+        <label class="sw"><input type="checkbox" id="spoil"></label>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  This page is a browser model of the firmware in <a href="https://github.com/Am4l-babu/stick-catching-game/tree/main/stick_catching_game" target="_blank" rel="noopener">stick_catching_game.ino</a>:
+  the same five-state machine, Fisher-Yates shuffle, random gaps, servo release delay, and log messages. Falling physics and servo speed are approximations.
+</footer>
+<div id="err"></div>
+
+<script>
+window.addEventListener('error', function (e) {
+  var el = document.getElementById('err');
+  if (el) { el.textContent += 'JSERR: ' + e.message + ' @' + e.lineno + '\n'; }
+});
+(function () {
+'use strict';
+
+/* =========================================================
+   CONSTANTS
+   ========================================================= */
+var N = 6;
+var W = 960, H = 520;
+var FLOOR_Y = 470;
+var STICK_LEN = 180;
+var LEVER_L = 40;
+var THRESH = 20;            // degrees the hook must move before the stick slips off
+var SERVO_SPEED = 500;      // deg per second (SG90 is ~600)
+var PAL = [
+  { base: '#ff5d73', dark: '#b5283c', light: '#ffb0bb' },
+  { base: '#ffb84d', dark: '#b87410', light: '#ffe0a8' },
+  { base: '#ffe66d', dark: '#b9a12a', light: '#fff4b8' },
+  { base: '#4ade80', dark: '#1f9a4f', light: '#b4f5cd' },
+  { base: '#38bdf8', dark: '#1a7db0', light: '#a8e3fd' },
+  { base: '#a78bfa', dark: '#6a4fd0', light: '#d3c7fd' }
+];
+var FONT = getComputedStyle(document.body).fontFamily;
+var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function $(s) { return document.querySelector(s); }
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+function rad(d) { return d * Math.PI / 180; }
+function laneX(i) { return 120 + i * 144; }
+function pivot(i) { return { x: laneX(i) - 34, y: 112 }; }
+function tipPos(i, ang) {
+  var p = pivot(i), a = rad(ang);
+  return { x: p.x + LEVER_L * Math.cos(a), y: p.y + LEVER_L * Math.sin(a) };
+}
+
+/* =========================================================
+   SETTINGS (read live from the sliders)
+   ========================================================= */
+var S = {
+  get start()   { return +$('#startDelay').value; },
+  get min()     { return Math.min(+$('#minDelay').value, +$('#maxDelay').value); },
+  get max()     { return Math.max(+$('#minDelay').value, +$('#maxDelay').value); },
+  get release() { return +$('#releaseTime').value; },
+  get hold()    { return +$('#holdAngle').value; },
+  get relAng()  { return +$('#releaseAngle').value; },
+  get height()  { return +$('#dropHeight').value; },
+  get fallT()   { return Math.sqrt(2 * this.height / 980); },   // seconds
+  get bot()     { return $('#bot').checked; },
+  get spoil()   { return $('#spoil').checked; }
+};
+
+/* =========================================================
+   SERIAL LOG
+   ========================================================= */
+var logEl = $('#log');
+function log(text, cls) {
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = text === '' ? ' ' : text;
+  logEl.appendChild(d);
+  while (logEl.childNodes.length > 400) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function banner(t, cls) { log('================================', cls || 'b'); if (t) { log(t, cls || 'b'); log('================================', cls || 'b'); } }
+
+/* =========================================================
+   SOUND
+   ========================================================= */
+var actx = null, soundOn = true;
+function tone(freq, dur, type, vol, when, slideTo) {
+  var t = actx.currentTime + (when || 0);
+  var o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'sine';
+  o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol || 0.06, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function sfx(kind) {
+  if (!soundOn) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+    switch (kind) {
+      case 'start': tone(520, .09, 'triangle', .07); tone(780, .14, 'triangle', .07, .09); break;
+      case 'tick':  tone(660, .07, 'square', .035); break;
+      case 'go':    tone(1040, .3, 'square', .05); break;
+      case 'release': tone(230, .06, 'square', .04); break;
+      case 'catch': tone(880, .09, 'triangle', .08); tone(1320, .16, 'triangle', .08, .07); break;
+      case 'miss':  tone(150, .28, 'sine', .14, 0, 55); break;
+      case 'stop':  tone(300, .2, 'sawtooth', .04, 0, 120); break;
+      case 'perfect': [523, 659, 784, 1047].forEach(function (f, k) { tone(f, .2, 'triangle', .07, k * .09); }); break;
+    }
+  } catch (e) { /* audio unavailable */ }
+}
+
+/* =========================================================
+   GAME STATE  (mirrors stick_catching_game.ino)
+   ========================================================= */
+var state = 'WAITING';
+var order = [];
+var releasedCount = 0;
+var countdownStart = 0;
+var lastActionTime = 0;
+var currentDelay = 0;
+var relBusy = null;              // servo "delay(releaseTime)" in releaseCurrentStick()
+var sched = [];                  // timed callbacks standing in for delay()
+var lastTick = -1;
+var autoStart = false;
+var goFlash = -9999;
+
+var lev = [];                    // servo model
+var sticks = [];                 // stick model
+var round = null, lastRound = null, roundSeq = 0;
+var best = { avg: 0, caught: 0 };
+
+for (var i = 0; i < N; i++) {
+  lev.push({ angle: 0, target: 0 });
+  sticks.push(newStick());
+}
+function newStick() {
+  return { state: 'hanging', alpha: 1, armed: true, holdRef: 0, x: 0, y: 0, x0: 0, y0: 0, t0: 0, D: 0, T: 0,
+           rot: 0, w: 0, rid: 0, test: false, endAt: 0, botAt: Infinity, rt: 0, fadeAt: 0 };
+}
+
+function later(now, ms, fn) { sched.push({ at: now + ms, fn: fn }); }
+
+function setServo(i, a) { lev[i].target = clamp(a, 0, 180); }
+
+/* resetAllServos(): 100 ms between servos, like the firmware */
+function resetAllServos(now, then) {
+  log('');
+  log('Resetting all servos...');
+  for (var i = 0; i < N; i++) {
+    (function (k) { later(now, 100 * k, function () { setServo(k, S.hold); }); })(i);
+  }
+  later(now, 100 * N, function (t) {
+    log('All servos at HOLD position.');
+    if (then) then(t);
+  });
+}
+
+function generateRandomOrder() {
+  order = [];
+  for (var i = 0; i < N; i++) order.push(i);
+  for (var k = N - 1; k > 0; k--) {           // Fisher-Yates
+    var j = randInt(0, k), t = order[k]; order[k] = order[j]; order[j] = t;
+  }
+  var txt = S.spoil ? order.map(function (v) { return v + 1; }).join(' -> ')
+                    : order.map(function () { return '?'; }).join(' -> ') + '   (enable "Reveal random order" to peek)';
+  log('Random order: ' + txt);
+}
+
+function allHung() {
+  for (var i = 0; i < N; i++) if (sticks[i].state !== 'hanging' || sticks[i].alpha < 1 || !sticks[i].armed) return false;
+  return true;
+}
+
+function startGame(now, source) {
+  if (state !== 'WAITING') return;
+  if (!allHung()) { toast('Reloading sticks…'); return; }
+  hideSummary();
+  log('');
+  banner('START BUTTON PRESSED', 'b');
+  sfx('start');
+  state = 'RESETTING';
+  round = { id: ++roundSeq, res: [], cmd: [], releasedAll: false };
+  for (var i = 0; i < N; i++) { round.res.push({ s: 'pending', rt: 0 }); round.cmd.push(false); }
+  renderScore();
+  resetAllServos(now, function (t) {
+    generateRandomOrder();
+    releasedCount = 0;
+    countdownStart = t;
+    lastTick = -1;
+    state = 'COUNTDOWN';
+    log('Starting in ' + S.start + ' ms...');
+  });
+}
+
+function stopGame(now) {
+  autoStart = false;
+  log('');
+  banner('GAME STOPPED', 'b');
+  sfx('stop');
+  state = 'WAITING';
+  releasedCount = 0;
+  relBusy = null;
+  sched = [];
+  if (round) { lastRound = round; round = null; }
+  hideSummary();
+  resetAllServos(now, function () { log('Waiting for START button...'); });
+  renderScore();
+}
+
+function beginRelease(now) {
+  var lane = order[releasedCount];
+  log('');
+  log('Releasing STICK ' + (lane + 1), 'r');
+  if (round) round.cmd[lane] = true;
+  setServo(lane, S.relAng);
+  sfx('release');
+  relBusy = { lane: lane, until: now + S.release };
+}
+
+function finishRelease(now) {
+  var lane = relBusy.lane;
+  relBusy = null;
+  var st = sticks[lane];
+  if (round && st.state === 'hanging' && Math.abs(S.relAng - st.holdRef) < THRESH) {
+    round.res[lane] = { s: 'jam', rt: 0 };
+    log('WARNING: stick ' + (lane + 1) + ' did not drop (RELEASE is within ' + THRESH + ' deg of HOLD)', 'e');
+    toast('Stick ' + (lane + 1) + ' jammed: RELEASE angle too close to HOLD');
+    renderScore();
+  }
+  releasedCount++;
+  log('Released: ' + releasedCount + '/' + N);
+  if (releasedCount >= N) {
+    if (round) round.releasedAll = true;
+    state = 'RESETTING';
+    log('');
+    banner('ALL 6 STICKS HAVE FALLEN', 'b');
+    later(now, 500, function (t) {
+      resetAllServos(t, function () {
+        log('');
+        log('GAME READY');
+        log('Waiting for START button...');
+        state = 'WAITING';
+      });
+    });
+    return;
+  }
+  currentDelay = randInt(S.min, S.max);
+  lastActionTime = now;
+  log('Next stick after ' + currentDelay + ' ms', 'd');
+  state = 'BETWEEN_STICKS';
+}
+
+function testServo(now, i) {
+  if (state !== 'WAITING') { toast('GAME RUNNING'); log('GAME RUNNING', 'd'); return; }
+  log('Testing servo ' + (i + 1));
+  setServo(i, S.relAng);
+  later(now, S.release, function () { setServo(i, S.hold); });
+}
+
+function statusText(now) {
+  switch (state) {
+    case 'WAITING': return 'WAITING';
+    case 'COUNTDOWN':
+      var el = now - countdownStart, rem = el < S.start ? Math.ceil((S.start - el) / 1000) : 0;
+      return 'STARTING IN ' + rem + 's';
+    case 'RELEASE_STICK': return 'RELEASING';
+    case 'BETWEEN_STICKS': return 'WAITING - ' + releasedCount + '/6';
+    case 'RESETTING': return 'RESETTING';
+  }
+  return state;
+}
+
+/* firmware loop() equivalent */
+function gameTick(now) {
+  if (sched.length) {
+    sched.sort(function (a, b) { return a.at - b.at; });
+    while (sched.length && sched[0].at <= now) sched.shift().fn(now);
+  }
+  switch (state) {
+    case 'COUNTDOWN':
+      var el = now - countdownStart;
+      var rem = Math.ceil((S.start - el) / 1000);
+      if (rem <= 3 && rem >= 1 && rem !== lastTick) { lastTick = rem; sfx('tick'); }
+      if (el >= S.start) {
+        log('');
+        log('GO!', 'g');
+        sfx('go');
+        goFlash = now;
+        state = 'RELEASE_STICK';
+        relBusy = null;
+      }
+      break;
+    case 'RELEASE_STICK':
+      if (!relBusy) beginRelease(now);
+      else if (now >= relBusy.until) finishRelease(now);
+      break;
+    case 'BETWEEN_STICKS':
+      if (now - lastActionTime >= currentDelay) { state = 'RELEASE_STICK'; relBusy = null; }
+      break;
+  }
+}
+
+/* =========================================================
+   SERVOS + STICKS (physics)
+   ========================================================= */
+function stepServos(dt) {
+  for (var i = 0; i < N; i++) {
+    var l = lev[i], d = l.target - l.angle;
+    var m = SERVO_SPEED * dt;
+    l.angle = Math.abs(d) <= m ? l.target : l.angle + Math.sign(d) * m;
+  }
+}
+
+function dropStick(i, now) {
+  var st = sticks[i], tip = tipPos(i, lev[i].angle);
+  st.state = 'falling';
+  st.t0 = now;
+  st.x0 = tip.x; st.y0 = tip.y;
+  st.D = Math.max(20, FLOOR_Y - (tip.y + 6 + STICK_LEN));
+  st.T = S.fallT;
+  st.w = (Math.random() < .5 ? -1 : 1) * (0.5 + Math.random());
+  st.rot = 0;
+  var counted = !!(round && round.cmd[i] && round.res[i].s === 'pending');
+  st.test = !counted;
+  st.rid = counted ? round.id : 0;
+  st.botAt = Infinity;
+  if (S.bot && Math.random() > 0.07) {
+    var rt = clamp(280 + gauss() * 55, 170, 900);
+    st.botAt = now + rt;
+  }
+  if (st.test) log('(practice drop, stick ' + (i + 1) + ')', 'd');
+}
+function gauss() { var u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.2832 * v); }
+
+function stepSticks(now) {
+  for (var i = 0; i < N; i++) {
+    var st = sticks[i], l = lev[i];
+    if (st.state === 'hanging') {
+      if (!st.armed && Math.abs(l.angle - st.holdRef) < 0.6) st.armed = true;
+      if (st.alpha < 1) st.alpha = clamp((now - st.fadeAt) / 450, 0, 1);
+      if (st.armed && st.alpha >= 1 && Math.abs(l.angle - st.holdRef) >= THRESH) dropStick(i, now);
+    } else if (st.state === 'falling') {
+      var t = (now - st.t0) / 1000;
+      if (S.bot && st.botAt <= now) { tryCatch(i, now, true); continue; }
+      if (t >= st.T) landStick(i, now);
+    } else if ((st.state === 'caught' || st.state === 'landed') && state === 'WAITING' && !sched.length &&
+               now - st.endAt > 1400 && Math.abs(l.angle - S.hold) < 0.6) {
+      st.state = 'hanging'; st.alpha = 0; st.fadeAt = now; st.armed = false; st.holdRef = S.hold;
+    }
+  }
+}
+
+function landStick(i, now) {
+  var st = sticks[i];
+  st.state = 'landed'; st.endAt = now;
+  st.rot = clamp(st.w * st.T, -1.1, 1.1);
+  var x = st.x0, y = FLOOR_Y;
+  dust(x, y, PAL[i].base);
+  bump(6);
+  padFlash[i] = { t: now, c: '#fb7185' };
+  if (st.rid && round && st.rid === round.id) {
+    round.res[i] = { s: 'missed', rt: 0 };
+    floater(x, FLOOR_Y - 40, 'MISS', '#fb7185', now, 26);
+    renderScore();
+  } else {
+    floater(x, FLOOR_Y - 40, 'landed', '#8a94b8', now, 18);
+  }
+  sfx('miss');
+}
+
+function tryCatch(i, now, byBot) {
+  var st = sticks[i];
+  keyFlash(i);
+  if (st.state !== 'falling') {
+    if (!byBot && state !== 'WAITING' && st.state === 'hanging') { toast('Too early! Wait for the drop'); }
+    return;
+  }
+  var t = (now - st.t0) / 1000;
+  var dy = 0.5 * (2 * st.D / (st.T * st.T)) * t * t;
+  var x = st.x0, y = st.y0 + dy + 6 + STICK_LEN / 2;
+  st.state = 'caught'; st.endAt = now; st.rt = now - st.t0;
+  st.rot = clamp(st.w * t, -1.1, 1.1);
+  st.caughtY = st.y0 + dy;
+  burst(x, y, PAL[i].base, 26);
+  ring(x, y, PAL[i].light, now);
+  padFlash[i] = { t: now, c: PAL[i].base };
+  var ms = Math.round(st.rt);
+  var col = ms < 300 ? '#4ade80' : ms < 450 ? '#fbbf24' : '#fb923c';
+  if (st.rid && round && st.rid === round.id) {
+    round.res[i] = { s: 'caught', rt: ms, fallMs: st.T * 1000 };
+    floater(x, y - 30, ms + ' ms', col, now, 28);
+    renderScore();
+  } else {
+    floater(x, y - 30, 'practice ' + ms + ' ms', col, now, 20);
+  }
+  sfx('catch');
+}
+
+/* round bookkeeping */
+function checkRoundDone() {
+  if (!round || !round.releasedAll) return;
+  for (var i = 0; i < N; i++) if (round.res[i].s === 'pending') return;
+  finalizeRound();
+}
+
+function finalizeRound() {
+  var r = round;
+  lastRound = r; round = null;
+  var caught = [], rts = [];
+  r.res.forEach(function (x) { if (x.s === 'caught') { caught.push(x); rts.push(x.rt); } });
+  var n = caught.length;
+  var avg = n ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / n) : 0;
+  var fast = n ? Math.min.apply(null, rts) : 0;
+  var grade = 'D';
+  if (n === 6 && avg < 300) grade = 'S';
+  else if (n >= 5) grade = 'A';
+  else if (n === 4) grade = 'B';
+  else if (n >= 2) grade = 'C';
+  r.summary = { n: n, avg: avg, fast: fast, grade: grade };
+
+  var isNew = false;
+  if (n > best.caught || (n === best.caught && n > 0 && (best.avg === 0 || avg < best.avg))) {
+    if (n >= 1) { best.caught = n; best.avg = avg; isNew = true; saveBest(); }
+  }
+
+  $('#sumGrade').textContent = grade;
+  $('#sumLine').textContent = n + ' / 6 caught';
+  $('#sumSub').textContent = n ? 'average ' + avg + ' ms · fastest ' + fast + ' ms' : 'The sticks got away. Try a lower drop height!';
+  $('#sumBadge').innerHTML = isNew ? '<span class="badge-new">★ NEW PERSONAL BEST</span>' : '';
+  showSummary();
+  if (n === 6) { confetti(); sfx('perfect'); }
+  renderScore();
+  log('');
+  log('Round result: ' + n + '/6 caught' + (n ? ', avg ' + avg + ' ms' : '') + '  [grade ' + grade + ']', 'g');
+}
+
+/* =========================================================
+   PERSISTENCE (best score only, safe if storage is blocked)
+   ========================================================= */
+function loadBest() {
+  try { var v = JSON.parse(localStorage.getItem('stickcatcher.best') || 'null'); if (v) best = v; } catch (e) {}
+}
+function saveBest() { try { localStorage.setItem('stickcatcher.best', JSON.stringify(best)); } catch (e) {} }
+
+/* =========================================================
+   UI: scoreboard, toast, summary
+   ========================================================= */
+var slotsEl = $('#slots');
+for (var si = 0; si < N; si++) {
+  var sd = document.createElement('div');
+  sd.className = 'slot'; sd.style.setProperty('--kc', PAL[si].base);
+  sd.innerHTML = '<div class="n">STICK ' + (si + 1) + '</div><div class="v">–</div><div class="bar"><i></i></div>';
+  slotsEl.appendChild(sd);
+}
+var keysEl = $('#keys');
+for (var ki = 0; ki < N; ki++) {
+  var kb = document.createElement('button');
+  kb.className = 'key'; kb.style.setProperty('--kc', PAL[ki].base);
+  kb.innerHTML = (ki + 1) + '<small>CATCH</small>';
+  kb.setAttribute('aria-label', 'Catch stick ' + (ki + 1));
+  (function (k) { kb.addEventListener('pointerdown', function (e) { e.preventDefault(); tryCatch(k, performance.now(), false); }); })(ki);
+  keysEl.appendChild(kb);
+}
+var testsEl = $('#tests');
+for (var ti = 0; ti < N; ti++) {
+  var tb = document.createElement('button');
+  tb.className = 'pb test'; tb.textContent = 'STICK ' + (ti + 1);
+  (function (k) { tb.addEventListener('click', function () { testServo(performance.now(), k); }); })(ti);
+  testsEl.appendChild(tb);
+}
+function keyFlash(i) {
+  var el = keysEl.children[i];
+  el.classList.add('hit'); setTimeout(function () { el.classList.remove('hit'); }, 120);
+}
+
+function renderScore() {
+  var v = round || lastRound;
+  var slots = slotsEl.children;
+  var caughtN = 0, rts = [];
+  for (var i = 0; i < N; i++) {
+    var r = v ? v.res[i] : null, el = slots[i];
+    var vEl = el.querySelector('.v'), bar = el.querySelector('.bar i');
+    el.className = 'slot';
+    if (!r || r.s === 'pending') { vEl.textContent = '–'; bar.style.width = '0'; continue; }
+    if (r.s === 'caught') {
+      el.classList.add('caught'); vEl.textContent = r.rt + ' ms';
+      bar.style.width = clamp(r.rt / r.fallMs * 100, 4, 100) + '%';
+      caughtN++; rts.push(r.rt);
+    } else if (r.s === 'missed') { el.classList.add('missed'); vEl.textContent = 'MISSED'; bar.style.width = '100%'; }
+    else if (r.s === 'jam') { el.classList.add('jam'); vEl.textContent = 'JAM'; bar.style.width = '0'; }
+  }
+  var have = v && v.res.some(function (x) { return x.s !== 'pending'; });
+  $('#stCaught').textContent = have ? caughtN + ' / 6' : '–';
+  $('#stAvg').textContent = rts.length ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / rts.length) + ' ms' : '–';
+  $('#stFast').textContent = rts.length ? Math.min.apply(null, rts) + ' ms' : '–';
+  $('#stBest').textContent = best.caught ? best.avg + ' ms · ' + best.caught + '/6' : '–';
+}
+
+var toastTimer = 0;
+function toast(msg) {
+  var el = $('#toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('show'); }, 1800);
+}
+function showSummary() { $('#summary').classList.add('show'); }
+function hideSummary() { $('#summary').classList.remove('show'); }
+
+/* =========================================================
+   EFFECTS
+   ========================================================= */
+var parts = [], floaters = [], rings = [], padFlash = [], shake = 0;
+function burst(x, y, color, n) {
+  if (REDUCE) n = 6;
+  for (var k = 0; k < n; k++) {
+    var a = Math.random() * 6.283, sp = 80 + Math.random() * 240;
+    parts.push({ x: x, y: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: .5 + Math.random() * .5, max: 1, c: color, s: 2 + Math.random() * 3, g: 420, shape: 'c' });
+  }
+}
+function dust(x, y, color) {
+  for (var k = 0; k < (REDUCE ? 4 : 14); k++) {
+    var dir = Math.random() < .5 ? -1 : 1;
+    parts.push({ x: x, y: y - 4, vx: dir * (30 + Math.random() * 150), vy: -30 - Math.random() * 110, life: .4 + Math.random() * .4, max: 1, c: k % 3 ? '#8a94b8' : color, s: 2 + Math.random() * 3, g: 380, shape: 'c' });
+  }
+}
+function confetti() {
+  if (REDUCE) return;
+  var cols = ['#ff5d73', '#ffb84d', '#ffe66d', '#4ade80', '#38bdf8', '#a78bfa'];
+  for (var k = 0; k < 140; k++) {
+    parts.push({ x: Math.random() * W, y: -20 - Math.random() * 200, vx: (Math.random() - .5) * 120, vy: 60 + Math.random() * 160, life: 2.6 + Math.random() * 1.6, max: 1,
+                 c: cols[k % 6], s: 4 + Math.random() * 5, g: 90, shape: 'r', rot: Math.random() * 6, vr: (Math.random() - .5) * 10 });
+  }
+}
+function floater(x, y, text, color, now, size) { floaters.push({ x: x, y: y, text: text, c: color, t0: now, size: size || 22 }); }
+function ring(x, y, color, now) { rings.push({ x: x, y: y, c: color, t0: now }); }
+function bump(px) { if (!REDUCE) shake = Math.max(shake, px); }
+
+/* =========================================================
+   RENDERING
+   ========================================================= */
+var cv = $('#stage'), ctx = cv.getContext('2d');
+var scale = 1;
+function resize() {
+  var r = cv.getBoundingClientRect();
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(r.width * dpr);
+  cv.height = Math.round(r.width * H / W * dpr);
+  scale = cv.width / W;
+}
+window.addEventListener('resize', resize);
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+function drawBackdrop(now) {
+  var g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0e1530'); g.addColorStop(1, '#080c1a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // soft lane glows
+  for (var i = 0; i < N; i++) {
+    var rg = ctx.createRadialGradient(laneX(i) + 6, 300, 10, laneX(i) + 6, 300, 190);
+    rg.addColorStop(0, PAL[i].base + '1c'); rg.addColorStop(1, 'transparent');
+    ctx.fillStyle = rg; ctx.fillRect(laneX(i) - 100, 110, 220, 380);
+  }
+
+  // dashed lane guides
+  ctx.save();
+  ctx.setLineDash([4, 10]); ctx.lineWidth = 1.5;
+  for (var j = 0; j < N; j++) {
+    var tx = tipPos(j, S.hold).x;
+    ctx.strokeStyle = PAL[j].base + '40';
+    ctx.beginPath(); ctx.moveTo(tx, 330); ctx.lineTo(tx, FLOOR_Y); ctx.stroke();
+  }
+  ctx.restore();
+
+  // floor
+  var fg = ctx.createLinearGradient(0, FLOOR_Y, 0, H);
+  fg.addColorStop(0, '#1a2244'); fg.addColorStop(1, '#0b1022');
+  ctx.fillStyle = fg; ctx.fillRect(0, FLOOR_Y, W, H - FLOOR_Y);
+  ctx.strokeStyle = 'rgba(124,92,255,.7)'; ctx.lineWidth = 2;
+  ctx.shadowColor = '#7c5cff'; ctx.shadowBlur = 14;
+  ctx.beginPath(); ctx.moveTo(0, FLOOR_Y); ctx.lineTo(W, FLOOR_Y); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // lane pads
+  for (var k = 0; k < N; k++) {
+    var x = tipPos(k, S.hold).x, f = padFlash[k], a = 0;
+    if (f) { a = clamp(1 - (now - f.t) / 500, 0, 1); }
+    ctx.fillStyle = '#10183a';
+    rr(x - 56, FLOOR_Y + 12, 112, 30, 10); ctx.fill();
+    ctx.strokeStyle = PAL[k].base + '66'; ctx.lineWidth = 1.5; ctx.stroke();
+    if (a > 0) { ctx.globalAlpha = a * .7; ctx.fillStyle = f.c; rr(x - 56, FLOOR_Y + 12, 112, 30, 10); ctx.fill(); ctx.globalAlpha = 1; }
+    ctx.fillStyle = PAL[k].base; ctx.font = '800 15px ' + FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('KEY ' + (k + 1), x, FLOOR_Y + 27);
+  }
+}
+
+function drawRail() {
+  var g = ctx.createLinearGradient(0, 18, 0, 58);
+  g.addColorStop(0, '#2a3566'); g.addColorStop(1, '#151c3a');
+  ctx.fillStyle = g; rr(44, 18, W - 88, 40, 12); ctx.fill();
+  ctx.strokeStyle = '#3a4880'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#9aa6d6'; ctx.font = '700 12px ui-monospace,Consolas,monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('PCA9685  ·  16-CH PWM  ·  I2C 0x40', 64, 38);
+  ctx.textAlign = 'right'; ctx.fillText('SDA D2 · SCL D1', W - 64, 38);
+}
+
+function drawServo(i, now) {
+  var p = pivot(i), l = lev[i], col = PAL[i];
+  // body
+  var g = ctx.createLinearGradient(0, 58, 0, 104);
+  g.addColorStop(0, '#26305c'); g.addColorStop(1, '#141b38');
+  ctx.fillStyle = g; rr(p.x - 30, 58, 84, 46, 8); ctx.fill();
+  ctx.strokeStyle = '#3a4880'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = col.base; rr(p.x - 30, 58, 84, 5, 3); ctx.fill();
+  ctx.fillStyle = '#c3cbef'; ctx.font = '800 12px ui-monospace,Consolas,monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('SERVO ' + (i + 1), p.x - 22, 78);
+  ctx.fillStyle = '#7f8bb8'; ctx.font = '700 10px ui-monospace,Consolas,monospace';
+  ctx.fillText('CH' + i + '  ' + Math.round(l.angle) + '°', p.x - 22, 93);
+  // horn
+  var t = tipPos(i, l.angle);
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#0a0f22'; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+  var hg = ctx.createLinearGradient(p.x, p.y, t.x, t.y);
+  hg.addColorStop(0, '#e6ebff'); hg.addColorStop(1, '#8b97c9');
+  ctx.strokeStyle = hg; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+  ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(t.x, t.y, 4.5, 0, 6.283); ctx.fill();
+  ctx.fillStyle = '#e6ebff'; ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 6.283); ctx.fill();
+  ctx.fillStyle = col.base; ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 6.283); ctx.fill();
+}
+
+function drawStickShape(i, x, top, alpha, rot, about, glow, scaleK) {
+  var col = PAL[i];
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  var ox = x, oy = about === 'ring' ? top : top + 6 + STICK_LEN / 2;
+  ctx.translate(ox, oy);
+  if (scaleK && scaleK !== 1) ctx.scale(scaleK, scaleK);
+  ctx.rotate(rot);
+  ctx.translate(-ox, -oy);
+  if (glow) { ctx.shadowColor = col.base; ctx.shadowBlur = 26; }
+  // ring
+  ctx.strokeStyle = '#d7dcef'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, top, 6, 0, 6.283); ctx.stroke();
+  // body
+  var g = ctx.createLinearGradient(x - 9, 0, x + 9, 0);
+  g.addColorStop(0, col.dark); g.addColorStop(.4, col.base); g.addColorStop(.55, col.light); g.addColorStop(1, col.dark);
+  ctx.fillStyle = g; rr(x - 9, top + 6, 18, STICK_LEN, 8); ctx.fill();
+  ctx.shadowBlur = 0;
+  // bands
+  ctx.fillStyle = 'rgba(255,255,255,.28)';
+  for (var b = 0; b < 3; b++) ctx.fillRect(x - 9, top + 60 + b * 40, 18, 5);
+  // badge
+  ctx.fillStyle = 'rgba(8,12,26,.78)'; ctx.beginPath(); ctx.arc(x, top + 32, 8, 0, 6.283); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 11px ui-monospace,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(i + 1), x, top + 32.5);
+  ctx.restore();
+}
+
+function drawStick(i, now) {
+  var st = sticks[i], l = lev[i];
+  if (st.state === 'hanging') {
+    var t = tipPos(i, l.angle);
+    var sway = REDUCE ? 0 : Math.sin(now / 850 + i * 1.3) * 0.025;
+    drawStickShape(i, t.x, t.y, st.alpha, sway, 'ring', false, 1);
+  } else if (st.state === 'falling') {
+    var s = (now - st.t0) / 1000;
+    var dy = 0.5 * (2 * st.D / (st.T * st.T)) * s * s;
+    drawStickShape(i, st.x0, st.y0 + Math.min(dy, st.D), 1, clamp(st.w * s, -1.1, 1.1), 'center', true, 1);
+  } else if (st.state === 'caught') {
+    var k = clamp((now - st.endAt) / 520, 0, 1);
+    if (k < 1) drawStickShape(i, st.x0, st.caughtY, 1 - k, st.rot, 'center', true, 1 + .35 * k);
+  } else if (st.state === 'landed') {
+    var kk = clamp((now - st.endAt - 700) / 700, 0, 1);
+    if (kk < 1) drawStickShape(i, st.x0, st.y0 + st.D, .6 * (1 - kk), st.rot, 'center', false, 1);
+  }
+}
+
+function drawFx(now, dt) {
+  // rings
+  for (var r = rings.length - 1; r >= 0; r--) {
+    var q = rings[r], k = (now - q.t0) / 450;
+    if (k >= 1) { rings.splice(r, 1); continue; }
+    ctx.strokeStyle = q.c; ctx.globalAlpha = 1 - k; ctx.lineWidth = 4 * (1 - k) + 1;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 14 + k * 70, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  // particles
+  for (var i = parts.length - 1; i >= 0; i--) {
+    var p = parts[i];
+    p.life -= dt; if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    ctx.globalAlpha = clamp(p.life * 1.6, 0, 1); ctx.fillStyle = p.c;
+    if (p.shape === 'r') { p.rot += p.vr * dt; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillRect(-p.s, -p.s / 2, p.s * 2, p.s); ctx.restore(); }
+    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.s, 0, 6.283); ctx.fill(); }
+  }
+  ctx.globalAlpha = 1;
+  // floaters
+  for (var f = floaters.length - 1; f >= 0; f--) {
+    var o = floaters[f], kf = (now - o.t0) / 1100;
+    if (kf >= 1) { floaters.splice(f, 1); continue; }
+    ctx.globalAlpha = 1 - kf * kf; ctx.fillStyle = o.c;
+    ctx.font = '900 ' + o.size + 'px ' + FONT;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,.8)'; ctx.shadowBlur = 8;
+    ctx.fillText(o.text, o.x, o.y - kf * 46);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawOverlayText(now) {
+  var fam = FONT;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (state === 'COUNTDOWN') {
+    var el = now - countdownStart, remMs = S.start - el, rem = Math.ceil(remMs / 1000);
+    if (rem > 0) {
+      var frac = (remMs % 1000) / 1000; if (remMs % 1000 === 0) frac = 1;
+      ctx.globalAlpha = .18 + .82 * frac;
+      var sc = .85 + .35 * frac;
+      ctx.fillStyle = '#c9b8ff'; ctx.font = '900 ' + Math.round(170 * sc) + 'px ' + fam;
+      ctx.shadowColor = '#7c5cff'; ctx.shadowBlur = 40;
+      ctx.fillText(String(rem), W / 2, 385);
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      ctx.fillStyle = '#8a94b8'; ctx.font = '800 15px ' + fam;
+      ctx.fillText('GET READY', W / 2, 318);
+    }
+  }
+  var g = now - goFlash;
+  if (g >= 0 && g < 900) {
+    var k = g / 900;
+    ctx.globalAlpha = 1 - k; ctx.fillStyle = '#4ade80'; ctx.font = '900 ' + Math.round(120 + 60 * k) + 'px ' + fam;
+    ctx.shadowColor = '#4ade80'; ctx.shadowBlur = 40;
+    ctx.fillText('GO!', W / 2, 385); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  if (state === 'WAITING' && !round && !$('#summary').classList.contains('show') && allHung()) {
+    ctx.globalAlpha = .55 + .35 * Math.sin(now / 420);
+    ctx.fillStyle = '#b6c0e6'; ctx.font = '800 17px ' + fam;
+    ctx.fillText('PRESS  START  (SPACE)  TO PLAY', W / 2, 402);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function render(now, dt) {
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  if (shake > 0.2) { ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake); shake *= .86; } else shake = 0;
+  drawBackdrop(now);
+  drawRail();
+  for (var i = 0; i < N; i++) drawServo(i, now);
+  for (var j = 0; j < N; j++) drawStick(j, now);
+  drawFx(now, dt);
+  drawOverlayText(now);
+  ctx.restore();
+}
+
+/* =========================================================
+   MAIN LOOP
+   ========================================================= */
+var prev = performance.now(), lastStatus = '';
+function frame(now) {
+  var dt = Math.min(.05, (now - prev) / 1000); prev = now;
+  if (autoStart && state === 'WAITING' && allHung()) { autoStart = false; startGame(now, 'again'); }
+  gameTick(now);
+  stepServos(dt);
+  stepSticks(now);
+  checkRoundDone();
+  render(now, dt);
+
+  var s = statusText(now);
+  if (s !== lastStatus) { lastStatus = s; $('#status').textContent = s; }
+  var pill = $('#statePill');
+  if (pill.getAttribute('data-s') !== state) { pill.setAttribute('data-s', state); $('#stateName').textContent = state; }
+  var busy = state !== 'WAITING' || !allHung();
+  $('#hwStart').disabled = busy; $('#btnStart').disabled = busy;
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+   INPUT
+   ========================================================= */
+function pressStart() { startGame(performance.now(), 'ui'); }
+$('#btnStart').addEventListener('click', pressStart);
+$('#hwStart').addEventListener('click', pressStart);
+$('#btnStop').addEventListener('click', function () { stopGame(performance.now()); });
+$('#sumAgain').addEventListener('click', function () { hideSummary(); autoStart = true; });
+$('#sumClose').addEventListener('click', hideSummary);
+$('#clearLog').addEventListener('click', function () { logEl.textContent = ''; });
+
+cv.addEventListener('pointerdown', function (e) {
+  var r = cv.getBoundingClientRect();
+  var x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+  if (y < 60 || y > FLOOR_Y + 60) return;
+  var best = -1, bd = 1e9;
+  for (var i = 0; i < N; i++) { var d = Math.abs(x - tipPos(i, S.hold).x); if (d < bd) { bd = d; best = i; } }
+  if (bd < 72) tryCatch(best, performance.now(), false);
+});
+
+document.addEventListener('keydown', function (e) {
+  var tag = (e.target && e.target.tagName) || '';
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key >= '1' && e.key <= '6' && tag !== 'INPUT') { tryCatch(+e.key - 1, performance.now(), false); e.preventDefault(); }
+  else if (e.key === ' ' && (tag === 'BODY' || tag === 'CANVAS')) { e.preventDefault(); if (!e.repeat) { $('#hwStart').classList.add('down'); pressStart(); } }
+  else if (e.key === 'Escape') { stopGame(performance.now()); }
+});
+document.addEventListener('keyup', function (e) { if (e.key === ' ') $('#hwStart').classList.remove('down'); });
+
+/* sliders */
+var outs = [
+  ['startDelay', 'startValue', ' ms'], ['minDelay', 'minValue', ' ms'], ['maxDelay', 'maxValue', ' ms'],
+  ['releaseTime', 'releaseValue', ' ms'], ['holdAngle', 'holdValue', '°'], ['releaseAngle', 'releaseAngleValue', '°']
+];
+outs.forEach(function (o) {
+  var inp = $('#' + o[0]), out = $('#' + o[1]);
+  inp.addEventListener('input', function () { out.textContent = inp.value + o[2]; });
+});
+function holdChanged() {
+  if (state === 'WAITING') {
+    for (var i = 0; i < N; i++) {
+      setServo(i, S.hold);
+      if (sticks[i].state === 'hanging') { sticks[i].holdRef = S.hold; sticks[i].armed = false; }
+    }
+  }
+}
+$('#holdAngle').addEventListener('input', holdChanged);
+$('#holdAngle').addEventListener('change', function () { log(''); log('Servo settings updated.'); log('Hold angle: ' + S.hold); log('Release angle: ' + S.relAng); });
+$('#releaseAngle').addEventListener('change', function () { log(''); log('Servo settings updated.'); log('Hold angle: ' + S.hold); log('Release angle: ' + S.relAng); });
+['startDelay', 'minDelay', 'maxDelay', 'releaseTime'].forEach(function (id) {
+  $('#' + id).addEventListener('change', function () {
+    log(''); log('Timing settings updated.');
+    log('Start delay: ' + S.start); log('Min delay: ' + S.min); log('Max delay: ' + S.max); log('Release time: ' + S.release);
+  });
+});
+$('#dropHeight').addEventListener('input', function () {
+  $('#dropOut').textContent = S.height + ' cm';
+  $('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
+});
+
+var soundBtn = $('#soundBtn');
+soundBtn.addEventListener('click', function () {
+  soundOn = !soundOn;
+  soundBtn.setAttribute('aria-pressed', String(soundOn));
+  soundBtn.textContent = soundOn ? '🔊 Sound' : '🔇 Muted';
+  if (soundOn) sfx('tick');
+});
+
+/* =========================================================
+   BOOT
+   ========================================================= */
+loadBest();
+resize();
+if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+$('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
+
+banner('       STICK CATCHER', 'b');
+log('');
+log('Resetting all servos...');
+log('All servos at HOLD position.');
+log('');
+log('WiFi Access Point:');
+log('SSID: STICK-CATCHER');
+log('Password: 12345678');
+log('IP address: 192.168.4.1');
+log('');
+log('Web server started.');
+log('');
+log('Connect your phone/laptop to:');
+log('STICK-CATCHER');
+log('');
+log('Then open:');
+log('http://192.168.4.1');
+log('');
+log('Waiting for physical START button...');
+log('================================', 'b');
+renderScore();
+
+/* ?demo=1 : bot plays a round automatically (handy for screenshots and demos) */
+if (/[?&]demo\b/.test(location.search)) {
+  $('#bot').checked = true;
+  $('#spoil').checked = true;
+  $('#startDelay').value = 2000; $('#startDelay').dispatchEvent(new Event('input'));
+  setTimeout(function () { startGame(performance.now(), 'demo'); }, 600);
+}
+
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
