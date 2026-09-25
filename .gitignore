@@ -1,0 +1,23 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code (keep the recommended-extensions list only)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
+
+# Arduino IDE / arduino-cli build output
+build/
+*.elf
+*.bin
+*.hex
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
