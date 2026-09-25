@@ -29,6 +29,7 @@ The ESP8266 also creates its own Wi-Fi network, so you can start the game, stop 
   - [Option C: PlatformIO CLI](#option-c--platformio-cli)
 - [Web control panel](#-web-control-panel)
 - [Settings and calibration](#-settings-and-calibration)
+- [Servo test sketch](#-servo-test-sketch)
 - [How it works](#-how-it-works)
 - [HTTP API](#-http-api)
 - [Project structure](#-project-structure)
@@ -66,7 +67,8 @@ Press **■ STOP / RESET** at any time to abort a round and return every hook to
 - 📶 **Built-in Wi-Fi access point.** No router needed. Connect to `STICK-CATCHER` and open a page.
 - 📱 **Mobile web panel.** Start/stop, timing sliders, servo angle sliders and per-servo test buttons.
 - 🔘 **Physical START button.** Debounced, works alongside the web panel.
-- 🧪 **Servo test mode.** Fire any single hook to check your mechanics.
+- 🧪 **Servo test mode.** Fire any single hook from the web panel to check your mechanics.
+- 🔧 **Standalone servo test sketch.** Check wiring and find your servo limits from the serial monitor before running the game.
 - 🖥 **Serial log.** Everything the game does is printed at 115200 baud.
 - 🧩 **Non-blocking state machine.** Web requests keep being served while a round is running.
 
@@ -259,6 +261,44 @@ SG90 clones vary, so the defaults may not give a true 0° to 180° sweep.
 4. If a servo buzzes or hits its end stop, reduce `SERVO_MAX` or raise `SERVO_MIN` (for example 130 to 550) and re-upload.
 5. Tune **Servo release time** so the hook has time to move but the round still feels snappy.
 
+Not sure whether a problem is the wiring, the power or the game code? Flash the [servo test sketch](#-servo-test-sketch) first.
+
+---
+
+## 🔧 Servo test sketch
+
+[`servo_test/servo_test.ino`](servo_test/servo_test.ino) is a small standalone sketch for **checking your wiring and calibrating the servos before you run the game**. It uses the same pins and the same PCA9685 settings as the game, and you control it by typing single-letter commands in the serial monitor.
+
+On boot it scans the I²C bus (you should see the PCA9685 at `0x40`), moves all six hooks to HOLD and prints the command list.
+
+| Command | Action |
+| --- | --- |
+| `1` to `6` | Select that servo and fire it (release, wait, return to hold) |
+| `a` | Fire all six servos in order |
+| `w` | Slow 0° → 180° → 0° sweep of the selected servo |
+| `+` / `-` | Nudge the selected servo by ±5° and print its angle and pulse count |
+| `h` | Move all servos to HOLD |
+| `r` | Move all servos to RELEASE |
+| `i` | Scan the I²C bus |
+| `?` | Show the help |
+
+**Typical use**
+
+1. Flash the sketch (see below) and open the serial monitor at **115200 baud**.
+2. Type `i`. If nothing is found, fix SDA/SCL/power before anything else.
+3. Type `1` to `6` to make sure every hook moves. A dead servo points to a wiring or power problem on that channel.
+4. Use `w` to see each servo's real travel, and `+`/`-` to find the exact HOLD and RELEASE angles for your mechanism. Copy them into `holdAngle` / `releaseAngle` in the game (or into the web panel).
+5. If a servo buzzes or stalls near the ends of its travel, adjust `SERVO_MIN` / `SERVO_MAX` in both sketches.
+
+**How to flash it**
+
+| Toolchain | Steps |
+| --- | --- |
+| **VS Code + PlatformIO** | Click the PlatformIO icon ▸ **Project Tasks** ▸ **servo_test** ▸ **Upload**, then **Monitor**. Or run `pio run -e servo_test -t upload` and `pio device monitor`. |
+| **Arduino IDE** | **File ▸ Open…** ▸ `servo_test/servo_test.ino`, select the same board and port as for the game, then **Upload**. Open the Serial Monitor at 115200 baud. |
+
+When you are done, flash the game again (`nodemcuv2` environment in PlatformIO, or the `stick_catching_game` sketch in the Arduino IDE). The test sketch replaces the game on the board; it does not run alongside it.
+
 ---
 
 ## ⚙️ How it works
@@ -315,6 +355,10 @@ stick-catching-game/
 ├── stick_catching_game/            ← the sketch (Arduino IDE opens this folder)
 │   ├── stick_catching_game.ino     ← game logic, servo control, web handlers
 │   └── web_page.h                  ← the HTML/CSS/JS control panel
+├── servo_test/                     ← standalone wiring/calibration sketch
+│   └── servo_test.ino
+├── pio/
+│   └── servo_test_entry.cpp        ← lets PlatformIO build servo_test
 ├── platformio.ini                  ← PlatformIO build config (VS Code / CLI)
 ├── .vscode/
 │   └── extensions.json             ← recommends the PlatformIO extension
@@ -323,7 +367,13 @@ stick-catching-game/
 └── README.md
 ```
 
-The same sketch folder is used by both toolchains: `platformio.ini` points PlatformIO's `src_dir` at `stick_catching_game/`, so there is a single copy of the code.
+The same sketch folders are used by both toolchains, so there is a single copy of the code. `platformio.ini` points PlatformIO's `src_dir` at `stick_catching_game/` for the game, and the `servo_test` environment builds `servo_test/servo_test.ino` through the small wrapper in `pio/`.
+
+| PlatformIO environment | What it builds |
+| --- | --- |
+| `nodemcuv2` (default) | The game, for NodeMCU |
+| `d1_mini` | The game, for Wemos D1 mini |
+| `servo_test` | The servo test sketch (NodeMCU) |
 
 ---
 
@@ -334,7 +384,7 @@ The same sketch folder is used by both toolchains: `platformio.ini` points Platf
 | **Upload fails / "port not found"** | Try another USB cable (many are charge-only). Install the CP210x/CH340 driver. Hold **FLASH** while uploading starts if your board needs it. Lower the upload speed to 115200. |
 | **`STICK-CATCHER` network doesn't appear** | Wait a few seconds after boot. Check the serial monitor for the IP address. Make sure the code uploaded. |
 | **Page won't load** | Stay connected even if the phone says "no internet". Turn off mobile data and VPN. Use `http://` (not `https://`) and `192.168.4.1`. |
-| **Servos don't move** | Check the external 5 V supply and that **all grounds are joined**. Verify SDA to D2 and SCL to D1. Confirm the PCA9685 address is `0x40`. |
+| **Servos don't move** | Flash the [servo test sketch](#-servo-test-sketch) and type `i` to check the PCA9685 is found. Check the external 5 V supply and that **all grounds are joined**. Verify SDA to D2 and SCL to D1. Confirm the PCA9685 address is `0x40`. |
 | **Servos jitter, or the ESP8266 keeps resetting** | The power supply is too weak or the servos are drawing from the ESP. Use a dedicated 5 V supply of at least 2 A and add a 470 to 1000 µF capacitor across V+/GND on the PCA9685. |
 | **Sticks don't release, or drop early** | Recalibrate: adjust HOLD/RELEASE angles and the hook geometry. See [Calibrating your servos](#calibrating-your-servos). |
 | **Settings disappear after reboot** | By design. Web-panel values live in RAM. Change the defaults in the `.ino`. |
