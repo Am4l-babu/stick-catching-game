@@ -1,0 +1,45 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  firmware:
+    name: Build ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [nodemcuv2, d1_mini, servo_test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        run: pio run -e ${{ matrix.env }}
+
+  logic-test:
+    name: Game logic test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile
+        run: g++ -std=c++17 -Wall -I test/firmware -I stick_catching_game test/firmware/test_game.cpp -o test_game
+
+      - name: Run
+        run: ./test_game
