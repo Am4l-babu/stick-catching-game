@@ -8,7 +8,7 @@
 ![Framework](https://img.shields.io/badge/framework-Arduino-00979D?logo=arduino&logoColor=white)
 ![Build](https://img.shields.io/badge/build-PlatformIO-orange?logo=platformio&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-2.0.0--dev-purple)
+![Version](https://img.shields.io/badge/version-2.0.0-purple)
 
 </div>
 
@@ -16,16 +16,16 @@ Sticks hang from servo-driven hooks: **6 by default, and anywhere from 1 to 16**
 
 The ESP8266 also creates its own Wi-Fi network, so you can start the game, stop it, pick how many sticks you play with, tune the timing and calibrate every servo from your phone. No router or internet needed.
 
-> **Versions.** This is **v2** (in development on the [`v2`](https://github.com/Am4l-babu/stick-catching-game/tree/v2) branch): the number of sticks is selectable. The working six-stick version is tagged [**`v1.0.0`**](https://github.com/Am4l-babu/stick-catching-game/tree/v1.0.0). See the [changelog](CHANGELOG.md).
+> **Versions.** This is **v2**: the number of sticks is selectable. The working six-stick version is tagged [**`v1.0.0`**](https://github.com/Am4l-babu/stick-catching-game/tree/v1.0.0). See the [changelog](CHANGELOG.md).
 
 <p align="center">
-  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/v2/docs/simulator.html">
+  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html">
     <img src="docs/simulator-preview.png" alt="Stick Catcher browser simulator: servo hooks dropping glowing sticks, a phone-style control panel and a live serial monitor" width="900">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/v2/docs/simulator.html"><b>▶ Play the simulator in your browser</b></a> · no hardware needed
+  <a href="https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html"><b>▶ Play the simulator in your browser</b></a> · no hardware needed
 </p>
 
 ---
@@ -55,7 +55,7 @@ The ESP8266 also creates its own Wi-Fi network, so you can start the game, stop 
 
 ## 🕹 Try it in your browser
 
-Want to see the game before you build it? Open the **[interactive simulator](https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/v2/docs/simulator.html)**. It is a single self-contained page ([`docs/simulator.html`](docs/simulator.html)) that runs the same state machine as the firmware, so what you see matches what the hardware does.
+Want to see the game before you build it? Open the **[interactive simulator](https://htmlpreview.github.io/?https://github.com/Am4l-babu/stick-catching-game/blob/main/docs/simulator.html)**. It is a single self-contained page ([`docs/simulator.html`](docs/simulator.html)) that runs the same state machine as the firmware, so what you see matches what the hardware does.
 
 | | |
 | --- | --- |
