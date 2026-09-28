@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.0.0 (in development, `v2` branch)
+## v2.0.0
 
 Choose how many sticks you play with, from 1 to 16.
 
