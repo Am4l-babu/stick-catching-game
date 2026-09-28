@@ -2,7 +2,7 @@
 // STICK CATCHER - SERVO TEST
 //
 // Standalone sketch to check wiring and calibrate the
-// hook servos (1 to 16) BEFORE flashing the real game.
+// hook servos (1 to 32) BEFORE flashing the real game.
 //
 // Open the Serial Monitor at 115200 baud (line ending:
 // "No line ending" or "Newline" both work) and type a
@@ -10,7 +10,8 @@
 //
 // Same hardware as the game:
 //   PCA9685 SDA = GPIO4 (D2), SCL = GPIO5 (D1)
-//   Servos on PCA9685 channels 0..TOTAL_SERVOS-1
+//   Servos 1-16 on the PCA9685 at 0x40, CH0-CH15
+//   Servos 17-32 on a second PCA9685 at 0x41 (optional)
 // =====================================================
 
 #include <Arduino.h>
@@ -25,13 +26,11 @@
 #define SERVO_MIN 150
 #define SERVO_MAX 600
 
-// Set to the number of servos you built (1 to 16)
+// Set to the number of servos you built (1 to 16, or up
+// to 32 with a second PCA9685 at 0x41)
 const int TOTAL_SERVOS = 6;
 
-const uint8_t servoChannel[16] = {
-  0, 1, 2, 3, 4, 5, 6, 7,
-  8, 9, 10, 11, 12, 13, 14, 15
-};
+const int SERVOS_PER_BOARD = 16;
 
 int holdAngle = 0;
 int releaseAngle = 90;
@@ -40,7 +39,8 @@ int releaseTime = 400;
 // Angle change per '+' / '-'
 const int NUDGE_STEP = 5;
 
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+Adafruit_PWMServoDriver pwm1 = Adafruit_PWMServoDriver(0x40);
+Adafruit_PWMServoDriver pwm2 = Adafruit_PWMServoDriver(0x41);
 
 
 // =====================================================
@@ -79,7 +79,9 @@ void setServoAngle(int servo, int angle) {
 
   currentAngle[servo] = angle;
 
-  pwm.setPWM(servoChannel[servo], 0, angleToPulse(angle));
+  Adafruit_PWMServoDriver& board = servo < SERVOS_PER_BOARD ? pwm1 : pwm2;
+
+  board.setPWM(servo % SERVOS_PER_BOARD, 0, angleToPulse(angle));
 }
 
 
@@ -87,8 +89,8 @@ void printServo(int servo) {
 
   Serial.print("Servo ");
   Serial.print(servo + 1);
-  Serial.print(" (CH");
-  Serial.print(servoChannel[servo]);
+  Serial.print(servo < SERVOS_PER_BOARD ? " (0x40 CH" : " (0x41 CH");
+  Serial.print(servo % SERVOS_PER_BOARD);
   Serial.print(") -> ");
   Serial.print(currentAngle[servo]);
   Serial.print(" deg, pulse ");
@@ -180,7 +182,15 @@ void scanI2C() {
       Serial.print(addr, HEX);
 
       if (addr == 0x40) {
-        Serial.print("  <- PCA9685 (expected)");
+        Serial.print("  <- PCA9685 board 1 (expected)");
+      }
+
+      if (addr == 0x41) {
+        Serial.print("  <- PCA9685 board 2 (servos 17-32)");
+      }
+
+      if (addr == 0x20 || addr == 0x21) {
+        Serial.print("  <- MCP23017 floor sensors");
       }
 
       Serial.println();
@@ -344,9 +354,15 @@ void setup() {
 
   Wire.begin(4, 5);
 
-  pwm.begin();
-  pwm.setOscillatorFrequency(27000000);
-  pwm.setPWMFreq(50);
+  pwm1.begin();
+  pwm1.setOscillatorFrequency(27000000);
+  pwm1.setPWMFreq(50);
+
+  if (TOTAL_SERVOS > SERVOS_PER_BOARD) {
+    pwm2.begin();
+    pwm2.setOscillatorFrequency(27000000);
+    pwm2.setPWMFreq(50);
+  }
 
   delay(500);
 
