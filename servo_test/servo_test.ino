@@ -1,8 +1,8 @@
 // =====================================================
 // STICK CATCHER - SERVO TEST
 //
-// Standalone sketch to check wiring and calibrate the six
-// hook servos BEFORE flashing the real game.
+// Standalone sketch to check wiring and calibrate the
+// hook servos (1 to 16) BEFORE flashing the real game.
 //
 // Open the Serial Monitor at 115200 baud (line ending:
 // "No line ending" or "Newline" both work) and type a
@@ -10,7 +10,7 @@
 //
 // Same hardware as the game:
 //   PCA9685 SDA = GPIO4 (D2), SCL = GPIO5 (D1)
-//   Servos on PCA9685 channels 0..5
+//   Servos on PCA9685 channels 0..TOTAL_SERVOS-1
 // =====================================================
 
 #include <Arduino.h>
@@ -25,9 +25,13 @@
 #define SERVO_MIN 150
 #define SERVO_MAX 600
 
+// Set to the number of servos you built (1 to 16)
 const int TOTAL_SERVOS = 6;
 
-const uint8_t servoChannel[TOTAL_SERVOS] = {0, 1, 2, 3, 4, 5};
+const uint8_t servoChannel[16] = {
+  0, 1, 2, 3, 4, 5, 6, 7,
+  8, 9, 10, 11, 12, 13, 14, 15
+};
 
 int holdAngle = 0;
 int releaseAngle = 90;
@@ -43,8 +47,15 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 // STATE
 // =====================================================
 
-// Servo used by w / + / - (0..5)
+// Servo used by w / + / - (0..TOTAL_SERVOS-1)
 int selected = 0;
+
+// Servo number being typed (for numbers above 9)
+int typedNumber = 0;
+unsigned long typedAt = 0;
+
+// How long to wait for a second digit
+const unsigned long TYPE_TIMEOUT = 700;
 
 // Last angle sent to each servo (for + / -)
 int currentAngle[TOTAL_SERVOS];
@@ -105,7 +116,8 @@ void fireServo(int servo) {
 
 void fireAll() {
 
-  Serial.println("Firing all servos in order 1..6");
+  Serial.print("Firing all servos in order 1..");
+  Serial.println(TOTAL_SERVOS);
 
   for (int i = 0; i < TOTAL_SERVOS; i++) {
 
@@ -193,8 +205,11 @@ void printHelp() {
   Serial.println("================================");
   Serial.println("   STICK CATCHER - SERVO TEST");
   Serial.println("================================");
-  Serial.println("1-6  select servo and fire it");
-  Serial.println("a    fire all servos, 1 to 6");
+  Serial.print("1-");
+  Serial.print(TOTAL_SERVOS);
+  Serial.println(TOTAL_SERVOS > 9 ? " select servo and fire it" : "  select servo and fire it");
+  Serial.print("a    fire all servos, 1 to ");
+  Serial.println(TOTAL_SERVOS);
   Serial.println("w    sweep selected servo 0-180-0");
   Serial.println("+    selected servo +5 deg");
   Serial.println("-    selected servo -5 deg");
@@ -217,13 +232,46 @@ void printHelp() {
 }
 
 
+// Fire the servo number that was typed
+void commitNumber() {
+
+  int n = typedNumber;
+  typedNumber = 0;
+
+  if (n < 1 || n > TOTAL_SERVOS) {
+
+    Serial.print("No servo ");
+    Serial.print(n);
+    Serial.print(" - use 1 to ");
+    Serial.println(TOTAL_SERVOS);
+    return;
+  }
+
+  selected = n - 1;
+  fireServo(selected);
+}
+
+
 void handleCommand(char c) {
 
-  if (c >= '1' && c <= '6') {
+  // Digits build a servo number. It fires as soon as
+  // another digit can't make a valid number (so "3"
+  // fires at once with 6 servos, while "1" waits
+  // briefly in case you are typing "12").
+  if (c >= '0' && c <= '9') {
 
-    selected = c - '1';
-    fireServo(selected);
+    typedNumber = typedNumber * 10 + (c - '0');
+    typedAt = millis();
+
+    if (typedNumber * 10 > TOTAL_SERVOS) {
+      commitNumber();
+    }
     return;
+  }
+
+  // Any other key (including Enter) ends the number
+  if (typedNumber > 0) {
+    commitNumber();
   }
 
   switch (c) {
@@ -315,5 +363,9 @@ void loop() {
   while (Serial.available()) {
 
     handleCommand((char)Serial.read());
+  }
+
+  if (typedNumber > 0 && millis() - typedAt >= TYPE_TIMEOUT) {
+    commitNumber();
   }
 }
