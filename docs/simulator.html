@@ -155,6 +155,19 @@ a{color:var(--accent2)}
 .pgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 .pgrid .pb{margin-top:0}
 .pgrid.many{grid-template-columns:repeat(4,1fr)}
+.pgrid.lots{grid-template-columns:repeat(6,1fr)}
+.pgrid.lots .pb{padding:9px 0;font-size:13px}
+.pb.test.sel{outline:3px solid #00ff99;outline-offset:-3px}
+.pb.plain{background:#3a3a3a;font-size:15px}
+.psub{text-align:center;color:#bbb;font-size:14px;margin-top:8px;min-height:17px;font-family:Arial,Helvetica,sans-serif}
+.planes{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:10px}
+.plane{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 10px Arial,Helvetica,sans-serif;border:2px solid #555;color:#aaa}
+.plane.d{border-color:#fbbf24;background:#fbbf24;color:#000}
+.plane.c{border-color:#16a34a;background:#16a34a;color:#fff}
+.plane.m{border-color:#dc2626;background:#dc2626;color:#fff}
+.pcard select{width:100%;padding:11px;margin-top:10px;font-size:16px;border-radius:10px;background:#151515;color:#fff;border:1px solid #444}
+.prow{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:15px}
+.pinfo{color:#9a9a9a;font-size:12.5px;line-height:1.6;margin-top:10px}
 .pcard label{display:block;margin-top:14px;font-size:15px}
 .pcard input[type=range]{width:100%;accent-color:#9333ea;margin:6px 0 0}
 .val{color:#00ff99;font-weight:700}
@@ -222,6 +235,7 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
         <span class="pill state" id="statePill" data-s="WAITING"><span class="dot"></span><span id="stateName">WAITING</span></span>
         <span class="pill"><span class="dot" style="background:var(--good)"></span>PCA9685 · 0x40</span>
         <span class="pill"><span class="dot" style="background:var(--accent2)"></span>AP · STICK-CATCHER</span>
+        <span class="pill" title="Status LED on D7: off when idle, fast blink in the countdown, on during a round, slow blink while reloading"><span class="dot" id="ledDot"></span>LED · D7</span>
         <span class="grow"></span>
         <span class="pill" id="fallPill">fall time · 0.45 s</span>
       </div>
@@ -231,7 +245,7 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
         <div class="toast" id="toast"></div>
         <div class="summary" id="summary" role="dialog" aria-label="Round summary">
           <div class="sum-card">
-            <small>ROUND COMPLETE</small>
+            <small id="sumTitle">ROUND COMPLETE</small>
             <div class="grade" id="sumGrade">A</div>
             <div class="sum-line" id="sumLine">5 / 6 caught</div>
             <div class="sum-sub" id="sumSub">average 312 ms · fastest 241 ms</div>
@@ -293,6 +307,9 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
 
           <div class="pcard">
             <div class="pstatus" aria-live="polite">Status: <span id="status">WAITING</span></div>
+            <div class="psub" id="roundInfo"></div>
+            <div class="planes" id="planes"></div>
+            <div class="psub" id="scoreInfo"></div>
             <button class="pb start" id="btnStart">▶ START GAME</button>
             <button class="pb stop" id="btnStop">■ STOP / RESET</button>
           </div>
@@ -300,8 +317,25 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
           <div class="pcard">
             <h2>🎯 Sticks</h2>
             <label>Number of sticks: <span class="val" id="sticksValue">6</span></label>
-            <input type="range" id="stickCount" min="1" max="16" value="6">
+            <input type="range" id="stickCount" min="1" max="32" value="6">
             <p class="note"><span id="sticksHint">Servos on PCA9685 channels 0 to 5.</span> On the real panel you press <b>SAVE STICK COUNT</b>. Change it between rounds.</p>
+          </div>
+
+          <div class="pcard">
+            <h2>🎮 Game Mode</h2>
+            <select id="mode">
+              <option value="0">Classic</option>
+              <option value="1">Speed-up</option>
+              <option value="2">Double drop</option>
+              <option value="3">Marathon</option>
+            </select>
+            <p class="note" id="modeHint"></p>
+            <div id="marathonBox">
+              <label>Rounds: <span class="val" id="roundsValue">5</span></label>
+              <input type="range" id="rounds" min="2" max="20" value="5">
+              <label>Reload pause: <span class="val" id="pauseValue">15 s</span></label>
+              <input type="range" id="pause" min="3" max="60" value="15">
+            </div>
           </div>
 
           <div class="pcard">
@@ -314,7 +348,7 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
             <input type="range" id="maxDelay" min="200" max="10000" step="100" value="2000">
             <label>Servo release time: <span class="val" id="releaseValue">200 ms</span></label>
             <input type="range" id="releaseTime" min="50" max="1000" step="10" value="200">
-            <p class="note">On the real panel you press <b>SAVE TIMING</b>. Here the sliders apply instantly.</p>
+            <p class="note">On the real panel every card has a <b>SAVE</b> button. Here the controls apply instantly.</p>
           </div>
 
           <div class="pcard">
@@ -327,9 +361,21 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
           </div>
 
           <div class="pcard">
-            <h2>🧪 Test Individual Servos</h2>
-            <div class="pgrid" id="tests"></div>
-            <p class="note">Fires one hook and returns it. The stick really falls, so you can practise catching.</p>
+            <h2>🧪 Test &amp; Fine-tune</h2>
+            <p class="note" style="margin-top:0">Tap a stick to fire its hook and select it. The stick really falls, so you can practise catching.</p>
+            <div class="pgrid" id="tests" style="margin-top:10px"></div>
+            <label>Trim for <b id="trimStick">STICK 1</b>: <span class="val" id="trimValue">0°</span></label>
+            <input type="range" id="trim" min="-45" max="45" value="0">
+            <p class="note">Added to this hook's HOLD and RELEASE angles, for a horn that sits a little off. Watch the hook move.</p>
+          </div>
+
+          <div class="pcard">
+            <h2>🔧 Board</h2>
+            <div class="prow"><span>🔊 Buzzer</span><label class="sw" style="margin:0"><input type="checkbox" id="buzzer" checked></label></div>
+            <div class="pinfo" id="boardInfo"></div>
+            <p class="note">Settings are saved on the board and kept after a restart. Here they are kept in this browser.</p>
+            <button class="pb plain" id="btnDefaults">↺ RESTORE DEFAULTS</button>
+            <p class="pinfo">Firmware update: <u>/update</u> (user <b>admin</b>). Not available in the simulator.</p>
           </div>
         </div>
       </div>
@@ -356,8 +402,8 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
 
 <footer>
   This page is a browser model of the firmware in <a href="https://github.com/Am4l-babu/stick-catching-game/tree/main/stick_catching_game" target="_blank" rel="noopener">stick_catching_game.ino</a>:
-  the same five-state machine, 1 to 16 sticks, Fisher-Yates shuffle, random gaps, servo release delay, and log messages. Falling physics and servo speed are approximations.
-  Add <code>?sticks=10</code> to the address to start with 10 sticks.
+  the same state machine, game modes, 1 to 32 sticks, per-hook trim, Fisher-Yates shuffle, random gaps, servo timing and log messages. Falling physics and servo speed are approximations.
+  Address options: <code>?sticks=10</code> (1 to 32), <code>?mode=marathon</code> (classic, speedup, double, marathon), <code>?demo=1</code> (the bot plays).
 </footer>
 <div id="err"></div>
 
@@ -372,9 +418,18 @@ window.addEventListener('error', function (e) {
 /* =========================================================
    CONSTANTS
    ========================================================= */
-var MAX_STICKS = 16;          // one PCA9685 = 16 channels
+var MAX_STICKS = 32;          // two PCA9685 boards x 16 channels
 var N = 6;                    // sticks in use (changed from the Sticks card)
-var KEYS = '1234567890QWERTY';  // catch key for each stick
+var KEY_ROWS = ['1234567890', 'QWERTYUIOP', 'ASDFGHJKL', 'ZXC'];
+var KEYS = KEY_ROWS.join('');    // catch key for each stick (32)
+var SPEEDUP = 0.85;              // speed-up mode: gaps x0.85 per round
+var MODE_NAMES = ['Classic', 'Speed-up', 'Double drop', 'Marathon'];
+var MODE_HINTS = [
+  'Every stick drops once, one at a time.',
+  'Each round the gaps get 15% shorter. STOP puts the speed back to normal.',
+  'Two sticks drop at the same moment.',
+  'Several rounds in a row, with a pause to reload the sticks between them.'
+];
 var W = 960, H = 520;
 var MARGIN = 48;              // stage edge to first/last lane
 var LW = 144;                 // lane width, (W - 2 * MARGIN) / N
@@ -394,6 +449,7 @@ var PAL = [
 ];
 ['#f472b6', '#2dd4bf', '#a3e635', '#818cf8', '#fb923c', '#22d3ee', '#e879f9', '#facc15', '#f87171', '#fda4af']
   .forEach(function (c) { PAL.push({ base: c, dark: mix(c, '#000000', .35), light: mix(c, '#ffffff', .55) }); });
+for (var pk = 16; pk < 32; pk++) PAL.push(PAL[pk - 16]);          // board 2 reuses the colours
 function mix(a, b, t) {
   var out = '#';
   for (var k = 1; k < 7; k += 2) {
@@ -428,6 +484,9 @@ var S = {
   get relAng()  { return +$('#releaseAngle').value; },
   get height()  { return +$('#dropHeight').value; },
   get fallT()   { return Math.sqrt(2 * this.height / 980); },   // seconds
+  get mode()    { return +$('#mode').value; },
+  get rounds()  { return +$('#rounds').value; },
+  get pause()   { return +$('#pause').value * 1000; },
   get bot()     { return $('#bot').checked; },
   get spoil()   { return $('#spoil').checked; }
 };
@@ -489,11 +548,18 @@ var releasedCount = 0;
 var countdownStart = 0;
 var lastActionTime = 0;
 var currentDelay = 0;
-var relBusy = null;              // servo "delay(releaseTime)" in releaseCurrentStick()
-var sched = [];                  // timed callbacks standing in for delay()
+var roundEndAt = 0;
+var reloadUntil = 0;
+var relBusy = null;              // hooks moving: releaseTime before the gap starts
+var sched = [];                  // timed steps: servo reset queue, test-fire returns
 var lastTick = -1;
 var autoStart = false;
 var goFlash = -9999;
+var speedLevel = 0;              // speed-up: rounds played at the current pace
+var marathonRound = 0;           // 1.. during a marathon, 0 otherwise
+var marathon = null;             // totals across marathon rounds
+var trims = [];                  // per-hook trim, degrees
+for (var ti = 0; ti < 32; ti++) trims.push(0);
 
 var lev = [];                    // servo model
 var sticks = [];                 // stick model
@@ -505,21 +571,25 @@ function newStick() {
            rot: 0, w: 0, rid: 0, test: false, endAt: 0, botAt: Infinity, rt: 0, fadeAt: 0 };
 }
 
-function later(now, ms, fn) { sched.push({ at: now + ms, fn: fn }); }
+function later(now, ms, fn, kind) { sched.push({ at: now + ms, fn: fn, kind: kind || '' }); }
+function resetPending() { return sched.some(function (x) { return x.kind === 'reset'; }); }
 
-function setServo(i, a) { if (i < N) lev[i].target = clamp(a, 0, 180); }   // i >= N: stick removed
+/* the hook's own trim is added to every angle, like setServoAngle() */
+function holdOf(i) { return clamp(S.hold + trims[i], 0, 180); }
+function setServo(i, a) { if (lev[i]) lev[i].target = clamp(a + trims[i], 0, 180); }   // no hook: stick removed
 
-/* resetAllServos(): 100 ms between servos, like the firmware */
+/* beginReset(): one hook every 100 ms without blocking; a new reset replaces one in progress */
 function resetAllServos(now, then) {
+  sched = sched.filter(function (x) { return x.kind !== 'reset' && x.kind !== 'test'; });
   log('');
   log('Resetting all servos...');
   for (var i = 0; i < N; i++) {
-    (function (k) { later(now, 100 * k, function () { setServo(k, S.hold); }); })(i);
+    (function (k) { later(now, 100 * k, function () { setServo(k, S.hold); }, 'reset'); })(i);
   }
   later(now, 100 * N, function (t) {
     log('All servos at HOLD position.');
     if (then) then(t);
-  });
+  }, 'reset');
 }
 
 function generateRandomOrder() {
@@ -543,26 +613,32 @@ function allHung() {
   return true;
 }
 
+function beginRound(now) {
+  round = { id: ++roundSeq, res: [], cmd: [], releasedAll: false };
+  for (var i = 0; i < N; i++) { round.res.push({ s: 'pending', rt: 0 }); round.cmd.push(false); }
+  renderScore();
+  resetAllServos(now);                     // runs alongside the countdown
+  generateRandomOrder();
+  releasedCount = 0;
+  relBusy = null;
+  countdownStart = now;
+  lastTick = -1;
+  state = 'COUNTDOWN';
+  if (marathonRound) log('Marathon round ' + marathonRound + ' of ' + S.rounds);
+  if (S.mode === 1) log('Speed level ' + (speedLevel + 1));
+  log('Starting in ' + S.start + ' ms...');
+}
+
 function startGame(now, source) {
   if (state !== 'WAITING') return;
   if (!allHung()) { toast('Reloading sticks…'); return; }
-  if (sched.length) return;                  // firmware is still inside a blocking servo reset
   hideSummary();
   log('');
   banner('START BUTTON PRESSED', 'b');
   sfx('start');
-  state = 'RESETTING';
-  round = { id: ++roundSeq, res: [], cmd: [], releasedAll: false };
-  for (var i = 0; i < N; i++) { round.res.push({ s: 'pending', rt: 0 }); round.cmd.push(false); }
-  renderScore();
-  resetAllServos(now, function (t) {
-    generateRandomOrder();
-    releasedCount = 0;
-    countdownStart = t;
-    lastTick = -1;
-    state = 'COUNTDOWN';
-    log('Starting in ' + S.start + ' ms...');
-  });
+  marathonRound = S.mode === 3 ? 1 : 0;
+  marathon = marathonRound ? { caught: 0, total: 0, rts: [] } : null;
+  beginRound(now);
 }
 
 function stopGame(now) {
@@ -573,61 +649,107 @@ function stopGame(now) {
   state = 'WAITING';
   releasedCount = 0;
   relBusy = null;
-  sched = [];
+  marathonRound = 0; marathon = null; speedLevel = 0;
   if (round) { lastRound = round; round = null; }
   hideSummary();
-  resetAllServos(now, function () { log('Waiting for START button...'); });
+  resetAllServos(now);
+  log('Waiting for START button...');
   renderScore();
 }
 
+/* releaseStep(): one stick, or two in double-drop mode */
 function beginRelease(now) {
-  var lane = order[releasedCount];
-  log('');
-  log('Releasing STICK ' + (lane + 1), 'r');
-  if (round) round.cmd[lane] = true;
-  setServo(lane, S.relAng);
+  var lanes = [order[releasedCount]];
+  if (S.mode === 2 && releasedCount + 1 < N) lanes.push(order[releasedCount + 1]);
+  lanes.forEach(function (lane) {
+    log('');
+    log('Releasing STICK ' + (lane + 1), 'r');
+    if (round) {
+      round.cmd[lane] = true;
+      var st = sticks[lane];
+      if (st.state !== 'hanging' || st.alpha < 1 || !st.armed) {   // hook empty: stick not reloaded in time
+        round.res[lane] = { s: 'jam', rt: 0 };
+        log('WARNING: no stick on hook ' + (lane + 1), 'e');
+      }
+    }
+    setServo(lane, S.relAng);
+  });
   sfx('release');
-  relBusy = { lane: lane, until: now + S.release };
+  relBusy = { lanes: lanes, until: now + S.release };
 }
 
 function finishRelease(now) {
-  var lane = relBusy.lane;
+  var lanes = relBusy.lanes;
   relBusy = null;
-  var st = sticks[lane];
-  if (round && st.state === 'hanging' && Math.abs(S.relAng - st.holdRef) < THRESH) {
-    round.res[lane] = { s: 'jam', rt: 0 };
-    log('WARNING: stick ' + (lane + 1) + ' did not drop (RELEASE is within ' + THRESH + ' deg of HOLD)', 'e');
-    toast('Stick ' + (lane + 1) + ' jammed: RELEASE angle too close to HOLD');
-    renderScore();
-  }
-  releasedCount++;
+  lanes.forEach(function (lane) {
+    var st = sticks[lane];
+    if (round && round.res[lane].s === 'pending' && st.state === 'hanging' &&
+        Math.abs(clamp(S.relAng + trims[lane], 0, 180) - st.holdRef) < THRESH) {
+      round.res[lane] = { s: 'jam', rt: 0 };
+      log('WARNING: stick ' + (lane + 1) + ' did not drop (RELEASE is within ' + THRESH + ' deg of HOLD)', 'e');
+      toast('Stick ' + (lane + 1) + ' jammed: RELEASE angle too close to HOLD');
+      renderScore();
+    }
+    releasedCount++;
+  });
   log('Released: ' + releasedCount + '/' + N);
   if (releasedCount >= N) {
     if (round) round.releasedAll = true;
-    state = 'RESETTING';
-    log('');
-    banner('ALL ' + N + ' STICKS HAVE FALLEN', 'b');
-    later(now, 500, function (t) {
-      resetAllServos(t, function () {
-        log('');
-        log('GAME READY');
-        log('Waiting for START button...');
-        state = 'WAITING';
-      });
-    });
+    roundEndAt = now + 500;
+    state = 'ROUND_END';
     return;
   }
-  currentDelay = randInt(S.min, S.max);
+  var gap = randInt(S.min, S.max);
+  if (S.mode === 1) gap = Math.max(50, Math.floor(gap * Math.pow(SPEEDUP, speedLevel)));
+  currentDelay = gap;
   lastActionTime = now;
-  log('Next stick after ' + currentDelay + ' ms', 'd');
+  log('Next stick after ' + gap + ' ms', 'd');
   state = 'BETWEEN_STICKS';
 }
 
+function roundResolved() {
+  return !round || round.res.every(function (r) { return r.s !== 'pending'; });
+}
+
+/* finishRound() + afterReset() */
+function finishRound(now) {
+  log('');
+  banner('ALL ' + N + ' STICKS HAVE FALLEN', 'b');
+  var more = marathonRound > 0 && marathonRound < S.rounds;
+  if (S.mode === 1) speedLevel++;
+  if (round) finalizeRound(!more);
+  if (S.mode === 1) log('Next round is faster: gaps x' + Math.pow(SPEEDUP, speedLevel).toFixed(2));
+  state = 'RESETTING';
+  resetAllServos(now, afterReset);
+}
+
+function afterReset(t) {
+  if (marathonRound > 0 && marathonRound < S.rounds) {
+    marathonRound++;
+    reloadUntil = t + S.pause;
+    state = 'RELOADING';
+    log('');
+    log('Reload the sticks! Next round in ' + Math.floor(S.pause / 1000) + ' s', 'r');
+    return;
+  }
+  if (marathonRound > 0) {
+    log('');
+    log('MARATHON COMPLETE', 'g');
+    log('Total: ' + marathon.caught + '/' + marathon.total + ' caught');
+    marathonRound = 0;
+  }
+  log('');
+  log('GAME READY');
+  log('Waiting for START button...');
+  state = 'WAITING';
+}
+
 function testServo(now, i) {
+  selectStick(i);
   if (state !== 'WAITING') { toast('GAME RUNNING'); log('GAME RUNNING', 'd'); return; }
   log('Testing servo ' + (i + 1));
   setServo(i, S.relAng);
-  later(now, S.release, function () { setServo(i, S.hold); });
+  later(now, S.release, function () { setServo(i, S.hold); }, 'test');
 }
 
 function statusText(now) {
@@ -638,9 +760,19 @@ function statusText(now) {
       return 'STARTING IN ' + rem + 's';
     case 'RELEASE_STICK': return 'RELEASING';
     case 'BETWEEN_STICKS': return 'WAITING - ' + releasedCount + '/' + N;
+    case 'ROUND_END': return 'ROUND OVER';
     case 'RESETTING': return 'RESETTING';
+    case 'RELOADING': return 'RELOAD - NEXT ROUND IN ' + Math.max(0, Math.ceil((reloadUntil - now) / 1000)) + 's';
   }
   return state;
+}
+
+/* updateLed(): off idle, fast blink countdown, slow blink reloading, on in a round */
+function ledOn(now) {
+  if (state === 'WAITING') return false;
+  if (state === 'COUNTDOWN') return Math.floor(now / 250) % 2 === 1;
+  if (state === 'RELOADING') return Math.floor(now / 600) % 2 === 1;
+  return true;
 }
 
 /* firmware loop() equivalent */
@@ -654,7 +786,7 @@ function gameTick(now) {
       var el = now - countdownStart;
       var rem = Math.ceil((S.start - el) / 1000);
       if (rem <= 3 && rem >= 1 && rem !== lastTick) { lastTick = rem; sfx('tick'); }
-      if (el >= S.start) {
+      if (el >= S.start && !resetPending()) {       // GO once every hook is at HOLD
         log('');
         log('GO!', 'g');
         sfx('go');
@@ -669,6 +801,16 @@ function gameTick(now) {
       break;
     case 'BETWEEN_STICKS':
       if (now - lastActionTime >= currentDelay) { state = 'RELEASE_STICK'; relBusy = null; }
+      break;
+    case 'ROUND_END':
+      if (now >= roundEndAt && roundResolved()) finishRound(now);
+      break;
+    case 'RELOADING':
+      if (now >= reloadUntil) {
+        log('');
+        banner('NEXT ROUND', 'b');
+        beginRound(now);
+      }
       break;
   }
 }
@@ -716,9 +858,9 @@ function stepSticks(now) {
       var t = (now - st.t0) / 1000;
       if (S.bot && st.botAt <= now) { tryCatch(i, now, true); continue; }
       if (t >= st.T) landStick(i, now);
-    } else if ((st.state === 'caught' || st.state === 'landed') && state === 'WAITING' && !sched.length &&
-               now - st.endAt > 1400 && Math.abs(l.angle - S.hold) < 0.6) {
-      st.state = 'hanging'; st.alpha = 0; st.fadeAt = now; st.armed = false; st.holdRef = S.hold;
+    } else if ((st.state === 'caught' || st.state === 'landed') && (state === 'WAITING' || state === 'RELOADING') &&
+               !resetPending() && now - st.endAt > 1400 && Math.abs(l.angle - holdOf(i)) < 0.6) {
+      st.state = 'hanging'; st.alpha = 0; st.fadeAt = now; st.armed = false; st.holdRef = holdOf(i);
     }
   }
 }
@@ -769,43 +911,46 @@ function tryCatch(i, now, byBot) {
   sfx('catch');
 }
 
-/* round bookkeeping */
-function checkRoundDone() {
-  if (!round || !round.releasedAll) return;
-  for (var i = 0; i < N; i++) if (round.res[i].s === 'pending') return;
-  finalizeRound();
-}
-
-function finalizeRound() {
+/* round result; the overlay shows once the game is over (after the last marathon round) */
+function finalizeRound(gameOver) {
   var r = round;
   lastRound = r; round = null;
-  var caught = [], rts = [];
-  r.res.forEach(function (x) { if (x.s === 'caught') { caught.push(x); rts.push(x.rt); } });
-  var n = caught.length;
+  var rts = [];
+  r.res.forEach(function (x) { if (x.s === 'caught') rts.push(x.rt); });
+  var n = rts.length, total = N;
   var avg = n ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / n) : 0;
+  renderScore();
+  log('');
+  log('Round result: ' + n + '/' + N + ' caught' + (n ? ', avg ' + avg + ' ms' : ''), 'g');
+  if (marathon) { marathon.caught += n; marathon.total += N; marathon.rts = marathon.rts.concat(rts); }
+  if (!gameOver) { toast('Round ' + marathonRound + ': ' + n + '/' + N + ' caught. Reload!'); return; }
+
+  var title = 'ROUND COMPLETE';
+  if (marathon) { n = marathon.caught; total = marathon.total; rts = marathon.rts; title = 'MARATHON COMPLETE'; }
+  avg = n ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / n) : 0;
   var fast = n ? Math.min.apply(null, rts) : 0;
-  // same bands as the six-stick game (6/6, 5/6, 4/6, 2/6) scaled to N
-  var ratio = n / N, grade = 'D';
-  if (n === N && avg < 300) grade = 'S';
+  // same bands as the six-stick game (6/6, 5/6, 4/6, 2/6) scaled to the total
+  var ratio = n / total, grade = 'D';
+  if (n === total && avg < 300) grade = 'S';
   else if (ratio >= 5 / 6) grade = 'A';
   else if (ratio >= 4 / 6) grade = 'B';
   else if (ratio >= 2 / 6) grade = 'C';
   r.summary = { n: n, avg: avg, fast: fast, grade: grade };
 
   var isNew = false, b = bestFor(N);
-  if (n > b.caught || (n === b.caught && n > 0 && (b.avg === 0 || avg < b.avg))) {
+  if (!marathon && (n > b.caught || (n === b.caught && n > 0 && (b.avg === 0 || avg < b.avg)))) {
     if (n >= 1) { best[N] = { caught: n, avg: avg }; isNew = true; saveBest(); }
   }
 
+  $('#sumTitle').textContent = title;
   $('#sumGrade').textContent = grade;
-  $('#sumLine').textContent = n + ' / ' + N + ' caught';
-  $('#sumSub').textContent = n ? 'average ' + avg + ' ms · fastest ' + fast + ' ms' : 'The sticks got away. Try a lower drop height!';
+  $('#sumLine').textContent = n + ' / ' + total + ' caught';
+  $('#sumSub').textContent = (n ? 'average ' + avg + ' ms · fastest ' + fast + ' ms' : 'The sticks got away. Try a lower drop height!') +
+    (S.mode === 1 ? ' · next round gaps ×' + Math.pow(SPEEDUP, speedLevel).toFixed(2) : '');
   $('#sumBadge').innerHTML = isNew ? '<span class="badge-new">★ NEW PERSONAL BEST</span>' : '';
   showSummary();
-  if (n === N) { confetti(); sfx('perfect'); }
-  renderScore();
-  log('');
-  log('Round result: ' + n + '/' + N + ' caught' + (n ? ', avg ' + avg + ' ms' : '') + '  [grade ' + grade + ']', 'g');
+  if (n === total) { confetti(); sfx('perfect'); }
+  log('Grade ' + grade, 'g');
 }
 
 /* =========================================================
@@ -833,13 +978,14 @@ var slotsEl = $('#slots'), keysEl = $('#keys'), testsEl = $('#tests');
 /* scoreboard slots, catch keys and test buttons: one per stick */
 function buildLaneUI() {
   slotsEl.textContent = ''; keysEl.textContent = ''; testsEl.textContent = '';
-  var cols = N <= 8 ? N : Math.ceil(N / 2);
+  var rows = Math.ceil(N / 8), cols = Math.ceil(N / rows);           // rows of up to 8
   slotsEl.style.setProperty('--cols', cols);
   slotsEl.style.setProperty('--mcols', N <= 4 ? N : N <= 6 ? 3 : 4);
   slotsEl.classList.toggle('dense', cols > 6);
   keysEl.classList.toggle('many', N > 8);
-  keysEl.style.setProperty('--kcols', N <= 8 ? N : Math.ceil(N / 2));   // phone: one row, or two even rows
-  testsEl.classList.toggle('many', N > 6);
+  keysEl.style.setProperty('--kcols', cols);                         // phone: even rows of up to 8
+  testsEl.classList.toggle('many', N > 6 && N <= 16);
+  testsEl.classList.toggle('lots', N > 16);
   for (var i = 0; i < N; i++) {
     var sd = document.createElement('div');
     sd.className = 'slot'; sd.style.setProperty('--kc', PAL[i].base);
@@ -856,12 +1002,25 @@ function buildLaneUI() {
     var tb = document.createElement('button');
     tb.className = 'pb test'; tb.textContent = N > 6 ? String(i + 1) : 'STICK ' + (i + 1);
     tb.setAttribute('aria-label', 'Test stick ' + (i + 1));
+    if (i === selected) tb.classList.add('sel');
     (function (k) { tb.addEventListener('click', function () { testServo(performance.now(), k); }); })(i);
     testsEl.appendChild(tb);
   }
-  $('#keyRange').textContent = N === 1 ? '1' : N <= 10 ? '1–' + KEYS[N - 1] : '1–0, Q–' + KEYS[N - 1];
+  var parts = [], left = N;
+  KEY_ROWS.forEach(function (row) {
+    if (left <= 0) return;
+    var k = Math.min(left, row.length);
+    parts.push(k === 1 ? row[0] : row[0] + '–' + row[k - 1]);
+    left -= k;
+  });
+  $('#keyRange').textContent = parts.join(', ');
   $('#sticksValue').textContent = N;
-  $('#sticksHint').textContent = N === 1 ? 'Servo on PCA9685 channel 0.' : 'Servos on PCA9685 channels 0 to ' + (N - 1) + '.';
+  var b1 = Math.min(N, 16);
+  $('#sticksHint').textContent = (N === 1 ? 'Servo 1 on board 1, channel 0.' : 'Servos 1 to ' + b1 + ' on board 1 (0x40), channels 0 to ' + (b1 - 1) + '.') +
+    (N > 16 ? ' Servos 17 to ' + N + ' on board 2 (0x41), channels 0 to ' + (N - 17) + '.' : '');
+  $('#boardInfo').innerHTML = 'Firmware 3.0.0 (simulated)<br>Servo boards: ' + (N > 16 ? 2 : 1) + ' (up to ' + (N > 16 ? 32 : 16) +
+    ' sticks)<br>Floor sensors: simulated, scoring on';
+  if (selected >= N) selectStick(0);
   cv.setAttribute('aria-label', N + ' servo hooks each holding a stick. Click a falling stick or press its key (' +
     $('#keyRange').textContent + ') to catch it.');
 }
@@ -874,9 +1033,10 @@ function setStickCount(n, now, quiet) {
   LW = (W - 2 * MARGIN) / N;
   K = Math.min(1, LW / 144);
   while (lev.length < N) {                  // added hooks fade in already loaded
-    lev.push({ angle: S.hold, target: S.hold });
+    var h = holdOf(lev.length);
+    lev.push({ angle: h, target: h });
     var st = newStick();
-    st.holdRef = S.hold; st.alpha = quiet ? 1 : 0; st.fadeAt = now;
+    st.holdRef = h; st.alpha = quiet ? 1 : 0; st.fadeAt = now;
     sticks.push(st);
   }
   lev.length = N; sticks.length = N; padFlash.length = Math.min(padFlash.length, N);
@@ -889,7 +1049,18 @@ function setStickCount(n, now, quiet) {
     log('');
     log('Stick count updated: ' + N);
     resetAllServos(now);
+    saveSettings();
   }
+}
+
+/* Test & Fine-tune card */
+var selected = 0;
+function selectStick(i) {
+  selected = i;
+  for (var k = 0; k < testsEl.children.length; k++) testsEl.children[k].classList.toggle('sel', k === i);
+  $('#trimStick').textContent = 'STICK ' + (i + 1);
+  $('#trim').value = trims[i];
+  $('#trimValue').textContent = (trims[i] > 0 ? '+' : '') + trims[i] + '°';
 }
 
 function keyFlash(i) {
@@ -995,7 +1166,7 @@ function drawBackdrop(now) {
   ctx.save();
   ctx.setLineDash([4, 10]); ctx.lineWidth = 1.5;
   for (var j = 0; j < N; j++) {
-    var tx = tipPos(j, S.hold).x;
+    var tx = tipPos(j, holdOf(j)).x;
     ctx.strokeStyle = PAL[j].base + '40';
     ctx.beginPath(); ctx.moveTo(tx, 330); ctx.lineTo(tx, FLOOR_Y); ctx.stroke();
   }
@@ -1013,7 +1184,7 @@ function drawBackdrop(now) {
   // lane pads
   var pw = Math.min(112, LW * .78);
   for (var k = 0; k < N; k++) {
-    var x = tipPos(k, S.hold).x, f = padFlash[k], a = 0;
+    var x = tipPos(k, holdOf(k)).x, f = padFlash[k], a = 0;
     if (f) { a = clamp(1 - (now - f.t) / 500, 0, 1); }
     ctx.fillStyle = '#10183a';
     rr(x - pw / 2, FLOOR_Y + 12, pw, 30, 10); ctx.fill();
@@ -1032,7 +1203,7 @@ function drawRail() {
   ctx.strokeStyle = '#3a4880'; ctx.lineWidth = 1.5; ctx.stroke();
   ctx.fillStyle = '#9aa6d6'; ctx.font = '700 12px ui-monospace,Consolas,monospace';
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText('PCA9685  ·  16-CH PWM  ·  I2C 0x40', 64, 38);
+  ctx.fillText(N > 16 ? 'PCA9685 x2  ·  I2C 0x40 + 0x41  ·  ' + N + ' SERVOS' : 'PCA9685  ·  16-CH PWM  ·  I2C 0x40', 64, 38);
   ctx.textAlign = 'right'; ctx.fillText('SDA D2 · SCL D1', W - 64, 38);
 }
 
@@ -1055,9 +1226,12 @@ function drawServo(i, now) {
   } else {                                  // narrow lanes: number + angle only
     ctx.fillStyle = '#c3cbef'; ctx.font = '800 12px ui-monospace,Consolas,monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(String(i + 1), bx + bw / 2, 76);
-    ctx.fillStyle = '#7f8bb8'; ctx.font = '700 9px ui-monospace,Consolas,monospace';
-    ctx.fillText(Math.round(l.angle) + '°', bx + bw / 2, 92);
+    ctx.font = (K >= .3 ? '800 12px ' : '800 10px ') + 'ui-monospace,Consolas,monospace';
+    ctx.fillText(String(i + 1), bx + bw / 2, K >= .3 ? 76 : 82);
+    if (K >= .3) {
+      ctx.fillStyle = '#7f8bb8'; ctx.font = '700 9px ui-monospace,Consolas,monospace';
+      ctx.fillText(Math.round(l.angle) + '°', bx + bw / 2, 92);
+    }
   }
   // horn
   var t = tipPos(i, l.angle);
@@ -1166,6 +1340,13 @@ function drawOverlayText(now) {
       ctx.fillText('GET READY', W / 2, 318);
     }
   }
+  if (state === 'RELOADING') {
+    var rl = Math.max(0, Math.ceil((reloadUntil - now) / 1000));
+    ctx.fillStyle = '#fbbf24'; ctx.font = '800 17px ' + fam;
+    ctx.fillText('RELOAD THE STICKS · ROUND ' + marathonRound + ' OF ' + S.rounds, W / 2, 318);
+    ctx.globalAlpha = .85; ctx.fillStyle = '#c9b8ff'; ctx.font = '900 110px ' + fam;
+    ctx.fillText(String(rl), W / 2, 395); ctx.globalAlpha = 1;
+  }
   var g = now - goFlash;
   if (g >= 0 && g < 900) {
     var k = g / 900;
@@ -1205,16 +1386,75 @@ function frame(now) {
   gameTick(now);
   stepServos(dt);
   stepSticks(now);
-  checkRoundDone();
   render(now, dt);
+  renderPhoneState(now);
 
   var s = statusText(now);
   if (s !== lastStatus) { lastStatus = s; $('#status').textContent = s; }
   var pill = $('#statePill');
   if (pill.getAttribute('data-s') !== state) { pill.setAttribute('data-s', state); $('#stateName').textContent = state; }
-  var busy = state !== 'WAITING' || !allHung() || sched.length > 0;
+  var busy = state !== 'WAITING' || !allHung();
   $('#hwStart').disabled = busy; $('#btnStart').disabled = busy; $('#stickCount').disabled = !canResize();
+  $('#mode').disabled = state !== 'WAITING';
+  $('#ledDot').style.background = ledOn(now) ? '#fbbf24' : '#3a3f55';
+  $('#ledDot').style.boxShadow = ledOn(now) ? '0 0 10px #fbbf24' : 'none';
   requestAnimationFrame(frame);
+}
+
+/* the phone's live view: one dot per stick, round and score lines (like /state) */
+var lastPhone = '';
+function renderPhoneState(now) {
+  var v = round || lastRound, lanes = '';
+  for (var i = 0; i < N; i++) {
+    var r = v && v.cmd[i] ? v.res[i].s : 'h';
+    lanes += r === 'pending' ? 'd' : r === 'caught' ? 'c' : r === 'h' ? 'h' : 'm';
+  }
+  var info = MODE_NAMES[S.mode];
+  if (marathonRound) info += ' · round ' + marathonRound + ' of ' + S.rounds;
+  if (S.mode === 1) info += ' · gaps ×' + Math.pow(SPEEDUP, speedLevel).toFixed(2);
+  var caught = 0, missed = 0;
+  for (var k = 0; k < lanes.length; k++) { caught += lanes[k] === 'c'; missed += lanes[k] === 'm'; }
+  var score = caught || missed ? 'Caught ' + caught + ' · missed ' + missed : '';
+  if (score && marathon) score += ' · total ' + (marathon.caught + (round ? caught : 0)) + ' caught';
+  var sig = lanes + '|' + info + '|' + score;
+  if (sig === lastPhone) return;
+  lastPhone = sig;
+  var el = $('#planes');
+  if (el.children.length !== N) {
+    el.textContent = '';
+    for (var j = 0; j < N; j++) { var d = document.createElement('div'); d.textContent = j + 1; el.appendChild(d); }
+  }
+  for (var m = 0; m < N; m++) el.children[m].className = 'plane ' + lanes[m];
+  $('#roundInfo').textContent = info;
+  $('#scoreInfo').textContent = score;
+}
+
+/* =========================================================
+   SETTINGS STORAGE (the board keeps them in flash; here, this browser)
+   ========================================================= */
+var SETTINGS_KEY = 'stickcatcher.settings.v3';
+var SAVED_IDS = ['startDelay', 'minDelay', 'maxDelay', 'releaseTime', 'holdAngle', 'releaseAngle', 'mode', 'rounds', 'pause'];
+var DEFAULTS = { startDelay: 5000, minDelay: 500, maxDelay: 2000, releaseTime: 200, holdAngle: 0, releaseAngle: 90, mode: 0, rounds: 5, pause: 15 };
+function saveSettings() {
+  try {
+    var v = { sticks: N, trims: trims.slice(), sound: soundOn };
+    SAVED_IDS.forEach(function (id) { v[id] = +$('#' + id).value; });
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(v));
+  } catch (e) {}
+}
+function loadSettings() {
+  var v = null;
+  try { v = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch (e) {}
+  return v;
+}
+function applySettings(v) {
+  SAVED_IDS.forEach(function (id) {
+    if (v[id] === undefined) return;
+    var el = $('#' + id); el.value = v[id]; el.dispatchEvent(new Event('input'));
+  });
+  if (v.trims) for (var i = 0; i < 32; i++) trims[i] = clamp(+v.trims[i] || 0, -45, 45);
+  if (v.sound === false) setSound(false);
+  showMode();
 }
 
 /* =========================================================
@@ -1241,7 +1481,7 @@ document.addEventListener('keydown', function (e) {
   var tag = (e.target && e.target.tagName) || '';
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   var lane = e.key.length === 1 ? KEYS.indexOf(e.key.toUpperCase()) : -1;
-  if (lane >= 0 && lane < N && tag !== 'INPUT') { tryCatch(lane, performance.now(), false); e.preventDefault(); }
+  if (lane >= 0 && lane < N && tag !== 'INPUT' && tag !== 'SELECT') { tryCatch(lane, performance.now(), false); e.preventDefault(); }
   else if (e.key === ' ' && (tag === 'BODY' || tag === 'CANVAS')) { e.preventDefault(); if (!e.repeat) { $('#hwStart').classList.add('down'); pressStart(); } }
   else if (e.key === 'Escape') { stopGame(performance.now()); }
 });
@@ -1258,9 +1498,9 @@ outs.forEach(function (o) {
 });
 function holdChanged() {
   if (state === 'WAITING') {
-    for (var i = 0; i < N; i++) {
+    for (var i = 0; i < sticks.length; i++) {
       setServo(i, S.hold);
-      if (sticks[i].state === 'hanging') { sticks[i].holdRef = S.hold; sticks[i].armed = false; }
+      if (sticks[i].state === 'hanging') { sticks[i].holdRef = holdOf(i); sticks[i].armed = false; }
     }
   }
 }
@@ -1277,31 +1517,94 @@ $('#stickCount').addEventListener('input', function () {
   if (!canResize()) { $('#stickCount').value = N; toast('GAME RUNNING'); return; }
   setStickCount(+$('#stickCount').value, performance.now());
 });
+$('#rounds').addEventListener('input', function () { $('#roundsValue').textContent = this.value; });
+$('#pause').addEventListener('input', function () { $('#pauseValue').textContent = this.value + ' s'; });
+function showMode() {
+  $('#modeHint').textContent = MODE_HINTS[S.mode];
+  $('#marathonBox').style.display = S.mode === 3 ? 'block' : 'none';
+}
+$('#mode').addEventListener('change', function () {
+  speedLevel = 0;                                  // a new mode starts at normal speed
+  showMode();
+  log(''); log('Game mode: ' + MODE_NAMES[S.mode].toUpperCase());
+});
+SAVED_IDS.forEach(function (id) { $('#' + id).addEventListener('change', saveSettings); });
+
+$('#trim').addEventListener('input', function () {
+  var v = +this.value;
+  trims[selected] = v;
+  $('#trimValue').textContent = (v > 0 ? '+' : '') + v + '°';
+  if (state === 'WAITING' && sticks[selected].state === 'hanging') {   // show the new HOLD position
+    setServo(selected, S.hold);
+    sticks[selected].holdRef = holdOf(selected); sticks[selected].armed = false;
+  }
+});
+$('#trim').addEventListener('change', function () {
+  log('Trim servo ' + (selected + 1) + ': ' + trims[selected] + ' deg');
+  saveSettings();
+});
+
+$('#buzzer').addEventListener('change', function () { setSound(this.checked); saveSettings(); });
+
+$('#btnDefaults').addEventListener('click', function () {
+  if (!canResize()) { toast('GAME RUNNING'); return; }
+  for (var i = 0; i < 32; i++) trims[i] = 0;
+  applySettings(DEFAULTS);
+  speedLevel = 0;
+  setStickCount(6, performance.now(), true);
+  holdChanged();
+  selectStick(0);
+  setSound(true);
+  log(''); log('Settings restored to defaults.');
+  saveSettings();
+  toast('DEFAULTS RESTORED');
+});
+
 $('#dropHeight').addEventListener('input', function () {
   $('#dropOut').textContent = S.height + ' cm';
   $('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
 });
 
 var soundBtn = $('#soundBtn');
+function setSound(on) {
+  soundOn = on;
+  soundBtn.setAttribute('aria-pressed', String(on));
+  soundBtn.textContent = on ? '🔊 Sound' : '🔇 Muted';
+  $('#buzzer').checked = on;
+}
 soundBtn.addEventListener('click', function () {
-  soundOn = !soundOn;
-  soundBtn.setAttribute('aria-pressed', String(soundOn));
-  soundBtn.textContent = soundOn ? '🔊 Sound' : '🔇 Muted';
+  setSound(!soundOn);
   if (soundOn) sfx('tick');
+  saveSettings();
 });
 
 /* =========================================================
    BOOT
    ========================================================= */
 loadBest();
+var saved = loadSettings();
+if (saved) applySettings(saved);
+showMode();
 var qs = /[?&]sticks=(\d+)/.exec(location.search);
-setStickCount(qs ? +qs[1] : 6, performance.now(), true);
+var qm = /[?&]mode=(\w+)/.exec(location.search);
+if (qm) {
+  var mi = ['classic', 'speedup', 'double', 'marathon'].indexOf(qm[1].toLowerCase());
+  if (mi < 0) mi = clamp(+qm[1] || 0, 0, 3);
+  $('#mode').value = mi; showMode();
+}
+setStickCount(qs ? +qs[1] : saved ? saved.sticks : 6, performance.now(), true);
+selectStick(0);
 resize();
 if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
 $('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
 
 banner('       STICK CATCHER', 'b');
-log('Sticks: ' + N + ' of ' + MAX_STICKS);
+log('Firmware 3.0.0 (simulated)');
+log('Servo boards: ' + (N > 16 ? 2 : 1) + ' (up to ' + (N > 16 ? 32 : 16) + ' sticks)');
+log(saved ? 'Settings loaded from flash.' : 'No saved settings, using defaults.');
+log('Sticks: ' + N + ' of ' + (N > 16 ? 32 : 16));
+log('Mode: ' + MODE_NAMES[S.mode].toUpperCase());
+log('Floor sensors: simulated (scoring on)');
 log('');
 log('Resetting all servos...');
 log('All servos at HOLD position.');
