@@ -1,9 +1,26 @@
+// =====================================================
+// STICK CATCHER
+//
+// ESP8266 + PCA9685 servo driver(s) + Wi-Fi web panel.
+// Sticks hang from servo hooks and drop one by one,
+// in a random order, at random intervals.
+// =====================================================
+
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266HTTPUpdateServer.h>
+#include <DNSServer.h>
+#include <ArduinoOTA.h>
 
+#include "settings.h"
+#include "buzzer.h"
+#include "lane_sensors.h"
 #include "web_page.h"
+
+#define FIRMWARE_VERSION "3.0.0"
+
 
 // =====================================================
 // WIFI ACCESS POINT
@@ -12,70 +29,58 @@
 const char* AP_SSID = "STICK-CATCHER";
 const char* AP_PASSWORD = "12345678";
 
+// Password for wireless firmware updates, both from
+// PlatformIO (OTA) and from http://192.168.4.1/update
+// (user name "admin"). Change it before you take the
+// game somewhere public.
+const char* OTA_PASSWORD = "stickcatcher";
+
+IPAddress apIP(192, 168, 4, 1);
+
 ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater;
+
+// Answers every DNS name with 192.168.4.1, so phones
+// open the control panel by themselves (captive portal)
+DNSServer dnsServer;
 
 
 // =====================================================
-// PCA9685
+// PCA9685 SERVO BOARDS
 // =====================================================
 
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+// Board 1 (address 0x40): servos 1-16 on CH0-CH15
+// Board 2 (address 0x41, solder jumper A0 closed):
+//         servos 17-32 on CH0-CH15. Optional.
 
-// One PCA9685 has 16 channels, so up to 16 sticks.
-//
-// PCA9685 channels
-// Servo 1  = CH0
-// Servo 2  = CH1
-// ...
-// Servo 16 = CH15
+Adafruit_PWMServoDriver pwm1 = Adafruit_PWMServoDriver(0x40);
+Adafruit_PWMServoDriver pwm2 = Adafruit_PWMServoDriver(0x41);
 
-const int MAX_STICKS = 16;
+bool board2Found = false;
 
-const uint8_t servoChannel[MAX_STICKS] = {
-  0, 1, 2, 3,
-  4, 5, 6, 7,
-  8, 9, 10, 11,
-  12, 13, 14, 15
-};
+// 16 with one board, 32 with two
+int availableSticks = STICKS_PER_BOARD;
 
 
 // =====================================================
 // ESP8266 GPIO
 // =====================================================
 
-// Physical START button
+// Physical START button to GND
 // GPIO14 = D5 on NodeMCU
 #define START_BUTTON 14
 
+// Passive buzzer (+ to this pin, - to GND)
+// GPIO12 = D6
+#define BUZZER_PIN 12
+
+// Status LED through a 220 ohm resistor to GND
+// GPIO13 = D7
+#define LED_PIN 13
+
 // I2C
-// SDA = GPIO4
-// SCL = GPIO5
-
-
-// =====================================================
-// SERVO SETTINGS
-// =====================================================
-
-// Initial position
-int holdAngle = 0;
-
-// Position where hook releases stick
-int releaseAngle = 90;
-
-// Time servo stays at release position
-int releaseTime = 200;
-
-
-// =====================================================
-// GAME TIMING
-// =====================================================
-
-// Delay between START button and first stick
-int startDelay = 5000;
-
-// Random delay between sticks
-int minDelay = 500;
-int maxDelay = 2000;
+// SDA = GPIO4 (D2)
+// SCL = GPIO5 (D1)
 
 
 // =====================================================
@@ -90,17 +95,38 @@ int maxDelay = 2000;
 
 
 // =====================================================
+// GAME TUNING
+// =====================================================
+
+// Servos are reset one after another, this far apart,
+// so they don't all start moving at once (current spike)
+const unsigned long RESET_STEP_MS = 100;
+
+// Floor sensors: a landing within this time after a
+// drop is a miss. No landing means the stick was caught.
+const unsigned long MISS_WINDOW_MS = 1500;
+
+// Speed-up mode: each round's gaps are this fraction of
+// the previous round's
+const float SPEEDUP_FACTOR = 0.85;
+
+// Shortest gap speed-up mode will go down to
+const unsigned long SPEEDUP_MIN_GAP = 50;
+
+
+// =====================================================
 // GAME STATE
 // =====================================================
 
 enum GameState {
 
-  WAITING,
-  COUNTDOWN,
-  RELEASE_STICK,
-  BETWEEN_STICKS,
-  RESETTING
-
+  WAITING,         // idle, waiting for START
+  COUNTDOWN,       // start delay running
+  RELEASE_STICK,   // drop the next stick now
+  BETWEEN_STICKS,  // random gap before the next drop
+  ROUND_END,       // last stick dropped, scoring
+  RESETTING,       // hooks going back to HOLD
+  RELOADING        // marathon: pause to reload sticks
 };
 
 GameState gameState = WAITING;
@@ -110,22 +136,25 @@ GameState gameState = WAITING;
 // GAME VARIABLES
 // =====================================================
 
-// Sticks used when the board powers up.
-// Set this to the number of servos you built (1 to MAX_STICKS).
-// It can also be changed from the web panel.
-const int DEFAULT_STICKS = 6;
+// Everything the web panel can change (see settings.h)
+Settings cfg;
 
-// Number of sticks in use (servos on CH0 .. CH stickCount-1)
-int stickCount = DEFAULT_STICKS;
+Buzzer buzzer;
 
-// Randomized order (first stickCount entries are used)
+LaneSensors sensors;
+
+// Randomized order (first cfg.sticks entries are used)
 int stickOrder[MAX_STICKS];
 
 // Number already released
 int releasedCount = 0;
 
-// Currently selected servo
-int currentStick = -1;
+// Per stick, this round:
+//   'h' hanging, 'd' dropped, 'c' caught, 'm' missed
+// (caught / missed need floor sensors)
+char laneState[MAX_STICKS];
+
+unsigned long droppedAt[MAX_STICKS];
 
 // Timing variables
 unsigned long countdownStart = 0;
@@ -134,12 +163,48 @@ unsigned long lastActionTime = 0;
 
 unsigned long currentDelay = 0;
 
+unsigned long roundEndAt = 0;
+
+unsigned long reloadUntil = 0;
+
+int lastBeepSecond = -1;
+
+// Speed-up mode: rounds played at the current pace
+int speedLevel = 0;
+
+// Marathon: current round (1..), 0 when not in a marathon
+int marathonRound = 0;
+
+// Scores (floor sensors only)
+int roundCaught = 0;
+int roundMissed = 0;
+int totalCaught = 0;
+int totalMissed = 0;
+int bestCaught = -1;
+
+// Non-blocking servo reset: next servo to move, -1 = idle
+int resetNext = -1;
+
+unsigned long resetDueAt = 0;
+
+// Test fire: when each hook goes back to HOLD (0 = not testing)
+unsigned long testReturnAt[MAX_STICKS];
+
+// Floor sensor bits from the previous read
+uint32_t lastSensorBits = 0;
+
+unsigned long lastSensorRead = 0;
+
 
 // =====================================================
 // BUTTON
 // =====================================================
 
-bool lastButtonState = HIGH;
+bool buttonRaw = HIGH;
+
+bool buttonStable = HIGH;
+
+unsigned long buttonChangedAt = 0;
 
 
 // =====================================================
@@ -163,40 +228,97 @@ uint16_t angleToPulse(int angle) {
 // SET ONE SERVO
 // =====================================================
 
+// angle is the global HOLD/RELEASE angle; the hook's own
+// trim is added here
+
 void setServoAngle(int stick, int angle) {
 
-  if (stick < 0 || stick >= MAX_STICKS) {
+  if (stick < 0 || stick >= availableSticks) {
     return;
   }
 
-  uint16_t pulse = angleToPulse(angle);
+  int trimmed =
+    constrain(angle + cfg.trim[stick], 0, 180);
 
-  pwm.setPWM(
-    servoChannel[stick],
+  Adafruit_PWMServoDriver& board =
+    stick < STICKS_PER_BOARD ? pwm1 : pwm2;
+
+  board.setPWM(
+    stick % STICKS_PER_BOARD,
     0,
-    pulse);
+    angleToPulse(trimmed));
 }
 
 
 // =====================================================
-// RESET ALL SERVOS
+// RESET ALL SERVOS (NON-BLOCKING)
 // =====================================================
 
-void resetAllServos() {
+// Starts moving the hooks back to HOLD, one every
+// RESET_STEP_MS. updateReset() does the work from loop(),
+// so the web panel keeps responding.
+
+void beginReset() {
 
   Serial.println();
   Serial.println("Resetting all servos...");
 
-  for (int i = 0; i < stickCount; i++) {
-
-    setServoAngle(
-      i,
-      holdAngle);
-
-    delay(100);
+  for (int i = 0; i < MAX_STICKS; i++) {
+    testReturnAt[i] = 0;
   }
 
-  Serial.println("All servos at HOLD position.");
+  resetNext = 0;
+
+  resetDueAt = millis();
+}
+
+
+bool resetBusy() {
+
+  return resetNext >= 0;
+}
+
+
+void updateReset(unsigned long now) {
+
+  if (resetNext < 0 || (long)(now - resetDueAt) < 0) {
+    return;
+  }
+
+  if (resetNext >= cfg.sticks) {
+
+    resetNext = -1;
+
+    Serial.println("All servos at HOLD position.");
+
+    return;
+  }
+
+  setServoAngle(
+    resetNext,
+    cfg.holdAngle);
+
+  resetNext++;
+
+  resetDueAt = now + RESET_STEP_MS;
+}
+
+
+// Test-fired hooks go back to HOLD after releaseTime
+
+void updateTests(unsigned long now) {
+
+  for (int i = 0; i < MAX_STICKS; i++) {
+
+    if (testReturnAt[i] && (long)(now - testReturnAt[i]) >= 0) {
+
+      testReturnAt[i] = 0;
+
+      setServoAngle(
+        i,
+        cfg.holdAngle);
+    }
+  }
 }
 
 
@@ -208,9 +330,9 @@ void generateRandomOrder() {
 
   // Start with:
   //
-  // 0 1 2 ... stickCount-1
+  // 0 1 2 ... sticks-1
 
-  for (int i = 0; i < stickCount; i++) {
+  for (int i = 0; i < cfg.sticks; i++) {
 
     stickOrder[i] = i;
   }
@@ -220,7 +342,7 @@ void generateRandomOrder() {
   //
   // Ensures every stick is used exactly once.
 
-  for (int i = stickCount - 1; i > 0; i--) {
+  for (int i = cfg.sticks - 1; i > 0; i--) {
 
     int j = random(
       0,
@@ -237,12 +359,12 @@ void generateRandomOrder() {
   // Serial monitor
   Serial.print("Random order: ");
 
-  for (int i = 0; i < stickCount; i++) {
+  for (int i = 0; i < cfg.sticks; i++) {
 
     Serial.print(
       stickOrder[i] + 1);
 
-    if (i < stickCount - 1) {
+    if (i < cfg.sticks - 1) {
       Serial.print(" -> ");
     }
   }
@@ -251,9 +373,67 @@ void generateRandomOrder() {
 }
 
 
+void clearLanes() {
+
+  for (int i = 0; i < MAX_STICKS; i++) {
+
+    laneState[i] = 'h';
+
+    droppedAt[i] = 0;
+  }
+}
+
+
 // =====================================================
 // START GAME
 // =====================================================
+
+void beginRound() {
+
+  // Make sure all hooks are at initial position
+  beginReset();
+
+
+  // Create a new random order
+  generateRandomOrder();
+
+
+  // Reset counters
+  releasedCount = 0;
+
+  roundCaught = 0;
+
+  roundMissed = 0;
+
+  clearLanes();
+
+
+  countdownStart = millis();
+
+  lastBeepSecond = -1;
+
+  gameState = COUNTDOWN;
+
+
+  if (marathonRound > 0) {
+
+    Serial.print("Marathon round ");
+    Serial.print(marathonRound);
+    Serial.print(" of ");
+    Serial.println(cfg.marathonRounds);
+  }
+
+  if (cfg.mode == MODE_SPEEDUP) {
+
+    Serial.print("Speed level ");
+    Serial.println(speedLevel + 1);
+  }
+
+  Serial.print("Starting in ");
+  Serial.print(cfg.startDelay);
+  Serial.println(" ms...");
+}
+
 
 void startGame() {
 
@@ -268,29 +448,17 @@ void startGame() {
   Serial.println("================================");
 
 
-  // Make sure all hooks are at initial position
-  resetAllServos();
+  marathonRound =
+    cfg.mode == MODE_MARATHON ? 1 : 0;
+
+  totalCaught = 0;
+
+  totalMissed = 0;
 
 
-  // Create a new random order
-  generateRandomOrder();
+  buzzer.start();
 
-
-  // Reset counters
-  releasedCount = 0;
-
-  currentStick = -1;
-
-
-  // Start 5-second countdown
-  countdownStart = millis();
-
-  gameState = COUNTDOWN;
-
-
-  Serial.print("Starting in ");
-  Serial.print(startDelay);
-  Serial.println(" ms...");
+  beginRound();
 }
 
 
@@ -310,11 +478,18 @@ void stopGame() {
 
   releasedCount = 0;
 
-  currentStick = -1;
+  marathonRound = 0;
+
+  speedLevel = 0;
+
+  clearLanes();
+
+
+  buzzer.stopped();
 
 
   // Return all hooks to initial position
-  resetAllServos();
+  beginReset();
 
 
   Serial.println("Waiting for START button...");
@@ -322,89 +497,103 @@ void stopGame() {
 
 
 // =====================================================
-// RELEASE ONE STICK
+// RELEASE STICKS
 // =====================================================
 
-void releaseCurrentStick() {
-
-  // Safety
-  if (releasedCount >= stickCount) {
-
-    gameState = RESETTING;
-
-    return;
-  }
-
-
-  // Get next stick from shuffled list
-  currentStick =
-    stickOrder[releasedCount];
-
+void releaseStick(int stick, unsigned long now) {
 
   Serial.println();
   Serial.print("Releasing STICK ");
-  Serial.println(currentStick + 1);
-
-
-  // ---------------------------------------------------
-  // Move hook to release position
-  // ---------------------------------------------------
-
-  setServoAngle(
-    currentStick,
-    releaseAngle);
-
-
-  // Give the servo time to move
-  delay(releaseTime);
+  Serial.println(stick + 1);
 
 
   // ---------------------------------------------------
   // IMPORTANT
   //
-  // We DON'T return the servo to 0° here.
-  //
-  // It remains at release position until every
+  // The hook stays at the release position until every
   // stick has fallen.
   // ---------------------------------------------------
 
+  setServoAngle(
+    stick,
+    cfg.releaseAngle);
+
+
+  laneState[stick] = 'd';
+
+  droppedAt[stick] = now;
 
   releasedCount++;
+}
+
+
+void releaseStep(unsigned long now) {
+
+  releaseStick(
+    stickOrder[releasedCount],
+    now);
+
+
+  // Double drop: a second stick at the same moment
+
+  if (cfg.mode == MODE_DOUBLE && releasedCount < cfg.sticks) {
+
+    releaseStick(
+      stickOrder[releasedCount],
+      now);
+  }
+
+
+  buzzer.release();
 
 
   Serial.print("Released: ");
   Serial.print(releasedCount);
   Serial.print("/");
-  Serial.println(stickCount);
+  Serial.println(cfg.sticks);
 
 
   // ---------------------------------------------------
   // If all sticks are released
   // ---------------------------------------------------
 
-  if (releasedCount >= stickCount) {
+  if (releasedCount >= cfg.sticks) {
 
-    gameState = RESETTING;
+    // Small pause before scoring and resetting
+    roundEndAt = now + 500;
+
+    gameState = ROUND_END;
 
     return;
   }
 
 
   // ---------------------------------------------------
-  // Generate random delay for next stick
+  // Random gap before the next stick
   // ---------------------------------------------------
 
-  currentDelay =
+  unsigned long gap =
     random(
-      minDelay,
-      maxDelay + 1);
+      cfg.minDelay,
+      cfg.maxDelay + 1);
 
 
-  lastActionTime = millis();
+  if (cfg.mode == MODE_SPEEDUP) {
+
+    gap = max(
+      SPEEDUP_MIN_GAP,
+      (unsigned long)(gap * pow(SPEEDUP_FACTOR, speedLevel)));
+  }
+
+
+  // The hook gets releaseTime to move, then the gap runs
+  currentDelay = cfg.releaseTime + gap;
+
+  lastActionTime = now;
 
 
   Serial.print("Next stick after ");
-  Serial.print(currentDelay);
+  Serial.print(gap);
   Serial.println(" ms");
 
 
@@ -413,30 +602,174 @@ void releaseCurrentStick() {
 
 
 // =====================================================
-// RESET AFTER GAME
+// FLOOR SENSORS
 // =====================================================
 
-void resetAfterGame() {
+bool lanesPending() {
+
+  if (!sensors.present()) {
+    return false;
+  }
+
+  for (int i = 0; i < cfg.sticks; i++) {
+
+    if (laneState[i] == 'd') {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+void updateSensors(unsigned long now) {
+
+  if (!sensors.present() || now - lastSensorRead < 5) {
+    return;
+  }
+
+  lastSensorRead = now;
+
+
+  uint32_t bits = sensors.read();
+
+  // Sensors that just became active
+  uint32_t landed = bits & ~lastSensorBits;
+
+  lastSensorBits = bits;
+
+
+  for (int i = 0; i < cfg.sticks; i++) {
+
+    if (laneState[i] != 'd') {
+      continue;
+    }
+
+
+    // A lane without a sensor can't be scored
+    if (i >= sensors.lanes()) {
+
+      laneState[i] = 'c';
+
+      continue;
+    }
+
+
+    if (landed & (1UL << i)) {
+
+      laneState[i] = 'm';
+
+      roundMissed++;
+
+      totalMissed++;
+
+      buzzer.miss();
+
+      Serial.print("Stick ");
+      Serial.print(i + 1);
+      Serial.println(" MISSED");
+    }
+
+    else if (now - droppedAt[i] >= MISS_WINDOW_MS) {
+
+      laneState[i] = 'c';
+
+      roundCaught++;
+
+      totalCaught++;
+
+      Serial.print("Stick ");
+      Serial.print(i + 1);
+      Serial.println(" caught");
+    }
+  }
+}
+
+
+// =====================================================
+// ROUND OVER
+// =====================================================
+
+void finishRound() {
 
   Serial.println();
   Serial.println("================================");
   Serial.print("ALL ");
-  Serial.print(stickCount);
+  Serial.print(cfg.sticks);
   Serial.println(" STICKS HAVE FALLEN");
   Serial.println("================================");
 
 
-  // Small pause before resetting
-  delay(500);
+  if (sensors.present()) {
+
+    Serial.print("Round result: ");
+    Serial.print(roundCaught);
+    Serial.print("/");
+    Serial.print(cfg.sticks);
+    Serial.println(" caught");
+
+    if (roundCaught > bestCaught) {
+      bestCaught = roundCaught;
+    }
+  }
 
 
-  // Return all hooks to 0°
-  resetAllServos();
+  if (cfg.mode == MODE_SPEEDUP) {
+
+    speedLevel++;
+
+    Serial.print("Next round is faster: gaps x");
+    Serial.println(pow(SPEEDUP_FACTOR, speedLevel), 2);
+  }
 
 
-  currentStick = -1;
+  buzzer.roundDone();
 
-  releasedCount = 0;
+
+  // Return all hooks to HOLD
+  beginReset();
+
+  gameState = RESETTING;
+}
+
+
+void afterReset(unsigned long now) {
+
+  // Marathon: pause, then the next round starts by itself
+
+  if (marathonRound > 0 && marathonRound < cfg.marathonRounds) {
+
+    marathonRound++;
+
+    reloadUntil = now + cfg.reloadPause;
+
+    gameState = RELOADING;
+
+    Serial.println();
+    Serial.print("Reload the sticks! Next round in ");
+    Serial.print(cfg.reloadPause / 1000);
+    Serial.println(" s");
+
+    return;
+  }
+
+
+  if (marathonRound > 0) {
+
+    Serial.println();
+    Serial.println("MARATHON COMPLETE");
+
+    if (sensors.present()) {
+
+      Serial.print("Total: ");
+      Serial.print(totalCaught);
+      Serial.print("/");
+      Serial.print(cfg.sticks * cfg.marathonRounds);
+      Serial.println(" caught");
+    }
+
+    marathonRound = 0;
+  }
 
 
   Serial.println();
@@ -452,81 +785,310 @@ void resetAfterGame() {
 // GAME STATE MACHINE
 // =====================================================
 
-void gameLoop() {
+void gameLoop(unsigned long now) {
+
+  switch (gameState) {
+
+
+    case WAITING:
+
+      break;
+
+
+    case COUNTDOWN: {
+
+      unsigned long elapsed =
+        now - countdownStart;
+
+
+      // Beep on the last three seconds
+
+      if (elapsed < cfg.startDelay) {
+
+        int remaining =
+          (cfg.startDelay - elapsed + 999) / 1000;
+
+        if (remaining <= 3 && remaining != lastBeepSecond) {
+
+          lastBeepSecond = remaining;
+
+          buzzer.tick();
+        }
+      }
+
+
+      // Go once the delay is over and every hook is at HOLD
+
+      if (elapsed >= cfg.startDelay && !resetBusy()) {
+
+        Serial.println();
+        Serial.println("GO!");
+
+        buzzer.go();
+
+        gameState = RELEASE_STICK;
+      }
+
+      break;
+    }
+
+
+    case RELEASE_STICK:
+
+      releaseStep(now);
+
+      break;
+
+
+    case BETWEEN_STICKS:
+
+      if (now - lastActionTime >= currentDelay) {
+
+        gameState = RELEASE_STICK;
+      }
+
+      break;
+
+
+    case ROUND_END:
+
+      // Wait for the floor sensors to decide every stick
+
+      if ((long)(now - roundEndAt) >= 0 && !lanesPending()) {
+
+        finishRound();
+      }
+
+      break;
+
+
+    case RESETTING:
+
+      if (!resetBusy()) {
+
+        afterReset(now);
+      }
+
+      break;
+
+
+    case RELOADING:
+
+      if ((long)(now - reloadUntil) >= 0) {
+
+        Serial.println();
+        Serial.println("================================");
+        Serial.println("NEXT ROUND");
+        Serial.println("================================");
+
+        beginRound();
+      }
+
+      break;
+  }
+}
+
+
+// =====================================================
+// STATUS LED
+// =====================================================
+
+void updateLed(unsigned long now) {
+
+  bool on;
+
+  switch (gameState) {
+
+    case WAITING:
+      on = false;
+      break;
+
+    // Fast blink: get ready
+    case COUNTDOWN:
+      on = (now / 250) % 2;
+      break;
+
+    // Slow blink: reload the sticks
+    case RELOADING:
+      on = (now / 600) % 2;
+      break;
+
+    // Solid: round running
+    default:
+      on = true;
+      break;
+  }
+
+  digitalWrite(
+    LED_PIN,
+    on ? HIGH : LOW);
+}
+
+
+// =====================================================
+// PHYSICAL START BUTTON
+// =====================================================
+
+// Debounced without delay(): the reading must stay the
+// same for 30 ms before it counts
+
+void readButton(unsigned long now) {
+
+  bool reading =
+    digitalRead(
+      START_BUTTON);
+
+
+  if (reading != buttonRaw) {
+
+    buttonRaw = reading;
+
+    buttonChangedAt = now;
+  }
+
+
+  if (buttonRaw != buttonStable && now - buttonChangedAt >= 30) {
+
+    buttonStable = buttonRaw;
+
+
+    // HIGH -> LOW = pressed. Only starts if waiting.
+
+    if (buttonStable == LOW) {
+
+      startGame();
+    }
+  }
+}
+
+
+// =====================================================
+// TEXT HELPERS
+// =====================================================
+
+const char* modeName(int mode) {
+
+  switch (mode) {
+
+    case MODE_SPEEDUP:
+      return "SPEED-UP";
+
+    case MODE_DOUBLE:
+      return "DOUBLE DROP";
+
+    case MODE_MARATHON:
+      return "MARATHON";
+
+    default:
+      return "CLASSIC";
+  }
+}
+
+
+String statusText() {
 
   unsigned long now = millis();
 
 
-  // ===================================================
-  // WAITING
-  // ===================================================
+  switch (gameState) {
+
+
+    case WAITING:
+
+      return "WAITING";
+
+
+    case COUNTDOWN: {
+
+      unsigned long elapsed =
+        now - countdownStart;
+
+
+      unsigned long remaining =
+        0;
+
+
+      if (elapsed < cfg.startDelay) {
+
+        remaining =
+          (cfg.startDelay - elapsed + 999) / 1000;
+      }
+
+
+      return "STARTING IN " + String(remaining) + "s";
+    }
+
+
+    case RELEASE_STICK:
+
+      return "RELEASING";
+
+
+    case BETWEEN_STICKS:
+
+      return "WAITING - " + String(releasedCount) + "/" + String(cfg.sticks);
+
+
+    case ROUND_END:
+
+      return "ROUND OVER";
+
+
+    case RESETTING:
+
+      return "RESETTING";
+
+
+    case RELOADING: {
+
+      long remaining =
+        ((long)(reloadUntil - now) + 999) / 1000;
+
+      return "RELOAD - NEXT ROUND IN " + String(max(remaining, 0L)) + "s";
+    }
+  }
+
+  return "";
+}
+
+
+const char* stateName() {
+
+  switch (gameState) {
+
+    case COUNTDOWN:      return "COUNTDOWN";
+    case RELEASE_STICK:  return "RELEASE_STICK";
+    case BETWEEN_STICKS: return "BETWEEN_STICKS";
+    case ROUND_END:      return "ROUND_END";
+    case RESETTING:      return "RESETTING";
+    case RELOADING:      return "RELOADING";
+    default:             return "WAITING";
+  }
+}
+
+
+void saveSettings() {
+
+  settingsSave(cfg);
+
+  Serial.println("Settings saved to flash.");
+}
+
+
+// Answers 409 and returns false while a round runs
+
+bool requireIdle() {
 
   if (gameState == WAITING) {
-
-    return;
+    return true;
   }
 
+  server.send(
+    409,
+    "text/plain",
+    "GAME RUNNING");
 
-  // ===================================================
-  // COUNTDOWN
-  // ===================================================
-
-  if (gameState == COUNTDOWN) {
-
-    unsigned long elapsed =
-      now - countdownStart;
-
-
-    if (elapsed >= startDelay) {
-
-      Serial.println();
-      Serial.println("GO!");
-
-      gameState = RELEASE_STICK;
-    }
-
-    return;
-  }
-
-
-  // ===================================================
-  // RELEASE NEXT STICK
-  // ===================================================
-
-  if (gameState == RELEASE_STICK) {
-
-    releaseCurrentStick();
-
-    return;
-  }
-
-
-  // ===================================================
-  // WAIT BETWEEN STICKS
-  // ===================================================
-
-  if (gameState == BETWEEN_STICKS) {
-
-    if (
-      now - lastActionTime >= currentDelay) {
-
-      gameState = RELEASE_STICK;
-    }
-
-    return;
-  }
-
-
-  // ===================================================
-  // RESET
-  // ===================================================
-
-  if (gameState == RESETTING) {
-
-    resetAfterGame();
-
-    return;
-  }
+  return false;
 }
 
 
@@ -534,17 +1096,36 @@ void gameLoop() {
 // WEB ROOT
 // =====================================================
 
+// The page lives in flash (PROGMEM) and is streamed from
+// there, so it doesn't take ~20 KB of RAM on every load.
+
 void handleRoot() {
 
-  server.send(
+  server.send_P(
     200,
     "text/html",
-    getHTML());
+    INDEX_HTML);
+}
+
+
+// Captive portal: send any other address to the panel
+
+void handleNotFound() {
+
+  server.sendHeader(
+    "Location",
+    "http://192.168.4.1/",
+    true);
+
+  server.send(
+    302,
+    "text/plain",
+    "");
 }
 
 
 // =====================================================
-// WEB START
+// WEB START / STOP
 // =====================================================
 
 void handleStart() {
@@ -557,10 +1138,6 @@ void handleStart() {
     "STARTED");
 }
 
-
-// =====================================================
-// WEB STOP
-// =====================================================
 
 void handleStop() {
 
@@ -582,88 +1159,56 @@ void handleSettings() {
 
   if (server.hasArg("start")) {
 
-    startDelay =
-      server.arg("start").toInt();
+    cfg.startDelay =
+      constrain(server.arg("start").toInt(), 0, 60000);
   }
 
 
   if (server.hasArg("min")) {
 
-    minDelay =
-      server.arg("min").toInt();
+    cfg.minDelay =
+      constrain(server.arg("min").toInt(), 0, 60000);
   }
 
 
   if (server.hasArg("max")) {
 
-    maxDelay =
-      server.arg("max").toInt();
+    cfg.maxDelay =
+      constrain(server.arg("max").toInt(), 0, 60000);
   }
 
 
   if (server.hasArg("release")) {
 
-    releaseTime =
-      server.arg("release").toInt();
+    cfg.releaseTime =
+      constrain(server.arg("release").toInt(), 0, 60000);
   }
 
 
-  // Safety check
+  // Safety check and limits (see settings.h)
 
-  if (minDelay > maxDelay) {
-
-    int temp = minDelay;
-
-    minDelay = maxDelay;
-
-    maxDelay = temp;
-  }
-
-
-  // Limits
-
-  startDelay =
-    constrain(
-      startDelay,
-      1000,
-      30000);
-
-
-  minDelay =
-    constrain(
-      minDelay,
-      50,
-      30000);
-
-
-  maxDelay =
-    constrain(
-      maxDelay,
-      50,
-      30000);
-
-
-  releaseTime =
-    constrain(
-      releaseTime,
-      50,
-      2000);
+  settingsClamp(
+    cfg,
+    availableSticks);
 
 
   Serial.println();
   Serial.println("Timing settings updated.");
 
   Serial.print("Start delay: ");
-  Serial.println(startDelay);
+  Serial.println(cfg.startDelay);
 
   Serial.print("Min delay: ");
-  Serial.println(minDelay);
+  Serial.println(cfg.minDelay);
 
   Serial.print("Max delay: ");
-  Serial.println(maxDelay);
+  Serial.println(cfg.maxDelay);
 
   Serial.print("Release time: ");
-  Serial.println(releaseTime);
+  Serial.println(cfg.releaseTime);
+
+
+  saveSettings();
 
 
   server.send(
@@ -682,47 +1227,36 @@ void handleServoSettings() {
 
   if (server.hasArg("hold")) {
 
-    holdAngle =
-      server.arg("hold").toInt();
+    cfg.holdAngle =
+      constrain(server.arg("hold").toInt(), 0, 180);
   }
 
 
   if (server.hasArg("release")) {
 
-    releaseAngle =
-      server.arg("release").toInt();
+    cfg.releaseAngle =
+      constrain(server.arg("release").toInt(), 0, 180);
   }
-
-
-  holdAngle =
-    constrain(
-      holdAngle,
-      0,
-      180);
-
-
-  releaseAngle =
-    constrain(
-      releaseAngle,
-      0,
-      180);
 
 
   Serial.println();
   Serial.println("Servo settings updated.");
 
   Serial.print("Hold angle: ");
-  Serial.println(holdAngle);
+  Serial.println(cfg.holdAngle);
 
   Serial.print("Release angle: ");
-  Serial.println(releaseAngle);
+  Serial.println(cfg.releaseAngle);
+
+
+  saveSettings();
 
 
   // Only move servos if game isn't running
 
   if (gameState == WAITING) {
 
-    resetAllServos();
+    beginReset();
   }
 
 
@@ -730,6 +1264,118 @@ void handleServoSettings() {
     200,
     "text/plain",
     "SERVO SETTINGS SAVED");
+}
+
+
+// =====================================================
+// WEB STICK COUNT
+// =====================================================
+
+void handleSticks() {
+
+
+  if (!server.hasArg("count")) {
+
+    server.send(
+      400,
+      "text/plain",
+      "NO COUNT");
+
+    return;
+  }
+
+
+  // The shuffled order is built for the current
+  // count, so only change it between rounds
+
+  if (!requireIdle()) {
+    return;
+  }
+
+
+  cfg.sticks =
+    constrain(
+      server.arg("count").toInt(),
+      1,
+      availableSticks);
+
+
+  Serial.println();
+  Serial.print("Stick count updated: ");
+  Serial.println(cfg.sticks);
+
+
+  saveSettings();
+
+  clearLanes();
+
+
+  // Move any newly added hooks to HOLD
+
+  beginReset();
+
+
+  server.send(
+    200,
+    "text/plain",
+    String(cfg.sticks));
+}
+
+
+// =====================================================
+// WEB GAME MODE
+// =====================================================
+
+void handleMode() {
+
+
+  if (!requireIdle()) {
+    return;
+  }
+
+
+  if (server.hasArg("mode")) {
+
+    cfg.mode =
+      constrain(server.arg("mode").toInt(), 0, MODE_COUNT - 1);
+  }
+
+
+  if (server.hasArg("rounds")) {
+
+    cfg.marathonRounds =
+      constrain(server.arg("rounds").toInt(), 0, 255);
+  }
+
+
+  if (server.hasArg("pause")) {
+
+    cfg.reloadPause =
+      constrain(server.arg("pause").toInt(), 0, 60000);
+  }
+
+
+  settingsClamp(
+    cfg,
+    availableSticks);
+
+
+  // A new mode starts at normal speed
+  speedLevel = 0;
+
+
+  Serial.println();
+  Serial.print("Game mode: ");
+  Serial.println(modeName(cfg.mode));
+
+
+  saveSettings();
+
+
+  server.send(
+    200,
+    "text/plain",
+    "MODE SAVED");
 }
 
 
@@ -756,7 +1402,7 @@ void handleTestServo() {
 
 
   if (
-    servo < 0 || servo >= stickCount) {
+    servo < 0 || servo >= cfg.sticks) {
 
     server.send(
       400,
@@ -784,21 +1430,16 @@ void handleTestServo() {
   Serial.println(servo + 1);
 
 
-  // Release
+  // Release now, back to HOLD after releaseTime
+  // (updateTests() in loop)
 
   setServoAngle(
     servo,
-    releaseAngle);
+    cfg.releaseAngle);
 
 
-  delay(releaseTime);
-
-
-  // Return to hold
-
-  setServoAngle(
-    servo,
-    holdAngle);
+  testReturnAt[servo] =
+    millis() + cfg.releaseTime;
 
 
   server.send(
@@ -809,58 +1450,139 @@ void handleTestServo() {
 
 
 // =====================================================
-// WEB STICK COUNT
+// WEB TRIM ONE HOOK
 // =====================================================
 
-void handleSticks() {
+// Corrects a hook whose horn sits a little off, by adding
+// a few degrees to both its HOLD and RELEASE angles
+
+void handleTrim() {
 
 
-  if (!server.hasArg("count")) {
+  if (!server.hasArg("servo") || !server.hasArg("value")) {
 
     server.send(
       400,
       "text/plain",
-      "NO COUNT");
+      "NEED servo AND value");
 
     return;
   }
 
 
-  // The shuffled order is built for the current
-  // count, so only change it between rounds
+  int servo =
+    server.arg("servo").toInt();
 
-  if (gameState != WAITING) {
+
+  if (servo < 0 || servo >= availableSticks) {
 
     server.send(
-      409,
+      400,
       "text/plain",
-      "GAME RUNNING");
+      "INVALID SERVO");
 
     return;
   }
 
 
-  stickCount =
-    constrain(
-      server.arg("count").toInt(),
-      1,
-      MAX_STICKS);
+  cfg.trim[servo] =
+    constrain(server.arg("value").toInt(), -MAX_TRIM, MAX_TRIM);
 
 
-  Serial.println();
-  Serial.print("Stick count updated: ");
-  Serial.println(stickCount);
+  Serial.print("Trim servo ");
+  Serial.print(servo + 1);
+  Serial.print(": ");
+  Serial.print(cfg.trim[servo]);
+  Serial.println(" deg");
 
 
-  // Move any newly added hooks to HOLD
+  saveSettings();
 
-  resetAllServos();
+
+  // Show the new HOLD position straight away
+
+  if (gameState == WAITING && !testReturnAt[servo]) {
+
+    setServoAngle(
+      servo,
+      cfg.holdAngle);
+  }
 
 
   server.send(
     200,
     "text/plain",
-    String(stickCount));
+    "TRIM SAVED");
+}
+
+
+// =====================================================
+// WEB SOUND
+// =====================================================
+
+void handleSound() {
+
+
+  if (server.hasArg("on")) {
+
+    cfg.sound =
+      server.arg("on").toInt() ? 1 : 0;
+  }
+
+
+  buzzer.setEnabled(cfg.sound);
+
+  buzzer.saved();
+
+
+  saveSettings();
+
+
+  server.send(
+    200,
+    "text/plain",
+    cfg.sound ? "SOUND ON" : "SOUND OFF");
+}
+
+
+// =====================================================
+// WEB RESTORE DEFAULTS
+// =====================================================
+
+void handleDefaults() {
+
+
+  if (!requireIdle()) {
+    return;
+  }
+
+
+  settingsDefaults(cfg);
+
+  settingsClamp(
+    cfg,
+    availableSticks);
+
+
+  Serial.println();
+  Serial.println("Settings restored to defaults.");
+
+
+  saveSettings();
+
+  buzzer.setEnabled(cfg.sound);
+
+  speedLevel = 0;
+
+  clearLanes();
+
+  beginReset();
+
+
+  server.send(
+    200,
+    "text/plain",
+    "DEFAULTS RESTORED");
 }
 
 
@@ -875,14 +1597,76 @@ void handleConfig() {
 
   String json = "{";
 
-  json += "\"sticks\":" + String(stickCount);
-  json += ",\"maxSticks\":" + String(MAX_STICKS);
-  json += ",\"start\":" + String(startDelay);
-  json += ",\"min\":" + String(minDelay);
-  json += ",\"max\":" + String(maxDelay);
-  json += ",\"release\":" + String(releaseTime);
-  json += ",\"hold\":" + String(holdAngle);
-  json += ",\"releaseAngle\":" + String(releaseAngle);
+  json += "\"version\":\"" FIRMWARE_VERSION "\"";
+  json += ",\"sticks\":" + String(cfg.sticks);
+  json += ",\"maxSticks\":" + String(availableSticks);
+  json += ",\"boards\":" + String(board2Found ? 2 : 1);
+  json += ",\"sensors\":" + String(sensors.lanes());
+  json += ",\"start\":" + String(cfg.startDelay);
+  json += ",\"min\":" + String(cfg.minDelay);
+  json += ",\"max\":" + String(cfg.maxDelay);
+  json += ",\"release\":" + String(cfg.releaseTime);
+  json += ",\"hold\":" + String(cfg.holdAngle);
+  json += ",\"releaseAngle\":" + String(cfg.releaseAngle);
+  json += ",\"mode\":" + String(cfg.mode);
+  json += ",\"rounds\":" + String(cfg.marathonRounds);
+  json += ",\"pause\":" + String(cfg.reloadPause);
+  json += ",\"sound\":" + String(cfg.sound);
+
+  json += ",\"trim\":[";
+
+  for (int i = 0; i < availableSticks; i++) {
+
+    if (i) {
+      json += ",";
+    }
+
+    json += String(cfg.trim[i]);
+  }
+
+  json += "]}";
+
+
+  server.send(
+    200,
+    "application/json",
+    json);
+}
+
+
+// =====================================================
+// WEB LIVE STATE
+// =====================================================
+
+// Everything the panel shows while a round runs. Polled
+// twice a second, so every connected phone stays in sync.
+
+void handleState() {
+
+  String lanes;
+
+  for (int i = 0; i < cfg.sticks; i++) {
+    lanes += laneState[i];
+  }
+
+
+  String json = "{";
+
+  json += "\"state\":\"" + String(stateName()) + "\"";
+  json += ",\"text\":\"" + statusText() + "\"";
+  json += ",\"sticks\":" + String(cfg.sticks);
+  json += ",\"released\":" + String(releasedCount);
+  json += ",\"lanes\":\"" + lanes + "\"";
+  json += ",\"mode\":" + String(cfg.mode);
+  json += ",\"speed\":" + String(pow(SPEEDUP_FACTOR, speedLevel), 2);
+  json += ",\"round\":" + String(marathonRound);
+  json += ",\"rounds\":" + String(cfg.marathonRounds);
+  json += ",\"sensors\":" + String(sensors.present() ? "true" : "false");
+  json += ",\"caught\":" + String(roundCaught);
+  json += ",\"missed\":" + String(roundMissed);
+  json += ",\"totalCaught\":" + String(totalCaught);
+  json += ",\"totalMissed\":" + String(totalMissed);
+  json += ",\"best\":" + String(bestCaught);
 
   json += "}";
 
@@ -898,80 +1682,28 @@ void handleConfig() {
 // WEB STATUS
 // =====================================================
 
+// Plain-text status, kept for scripts (see README)
+
 void handleStatus() {
-
-  String status;
-
-
-  switch (gameState) {
-
-
-    case WAITING:
-
-      status = "WAITING";
-
-      break;
-
-
-    case COUNTDOWN:
-
-      {
-
-        unsigned long elapsed =
-          millis() - countdownStart;
-
-
-        unsigned long remaining =
-          0;
-
-
-        if (elapsed < startDelay) {
-
-          remaining =
-            (startDelay - elapsed + 999) / 1000;
-        }
-
-
-        status =
-          "STARTING IN " + String(remaining) + "s";
-      }
-
-      break;
-
-
-    case RELEASE_STICK:
-
-      status = "RELEASING";
-
-      break;
-
-
-    case BETWEEN_STICKS:
-
-      status =
-        "WAITING - " + String(releasedCount) + "/" + String(stickCount);
-
-      break;
-
-
-    case RESETTING:
-
-      status = "RESETTING";
-
-      break;
-  }
-
 
   server.send(
     200,
     "text/plain",
-    status);
+    statusText());
 }
 
 
 // =====================================================
 // SETUP
 // =====================================================
+
+bool i2cFound(uint8_t address) {
+
+  Wire.beginTransmission(address);
+
+  return Wire.endTransmission() == 0;
+}
+
 
 void setup() {
 
@@ -987,19 +1719,23 @@ void setup() {
   Serial.println("       STICK CATCHER");
   Serial.println("================================");
 
-  Serial.print("Sticks: ");
-  Serial.print(stickCount);
-  Serial.print(" of ");
-  Serial.println(MAX_STICKS);
+  Serial.print("Firmware ");
+  Serial.println(FIRMWARE_VERSION);
 
 
   // ===================================================
-  // START BUTTON
+  // PINS
   // ===================================================
 
   pinMode(
     START_BUTTON,
     INPUT_PULLUP);
+
+  pinMode(
+    LED_PIN,
+    OUTPUT);
+
+  buzzer.begin(BUZZER_PIN);
 
 
   // ===================================================
@@ -1015,31 +1751,99 @@ void setup() {
 
 
   // ===================================================
-  // PCA9685
+  // PCA9685 BOARDS
   // ===================================================
 
-  pwm.begin();
-
+  pwm1.begin();
 
   // PCA9685 oscillator
-
-  pwm.setOscillatorFrequency(
-    27000000);
-
+  pwm1.setOscillatorFrequency(27000000);
 
   // SG90 = approximately 50Hz
+  pwm1.setPWMFreq(50);
 
-  pwm.setPWMFreq(50);
+
+  board2Found = i2cFound(0x41);
+
+  if (board2Found) {
+
+    pwm2.begin();
+    pwm2.setOscillatorFrequency(27000000);
+    pwm2.setPWMFreq(50);
+
+    availableSticks = MAX_STICKS;
+  }
+
+  Serial.print("Servo boards: ");
+  Serial.print(board2Found ? 2 : 1);
+  Serial.print(" (up to ");
+  Serial.print(availableSticks);
+  Serial.println(" sticks)");
 
 
-  delay(500);
+  // ===================================================
+  // SAVED SETTINGS
+  // ===================================================
+
+  if (settingsLoad(cfg)) {
+
+    Serial.println("Settings loaded from flash.");
+
+  } else {
+
+    Serial.println("No saved settings, using defaults.");
+  }
+
+
+  if (cfg.sticks > availableSticks) {
+
+    Serial.print("WARNING: ");
+    Serial.print(cfg.sticks);
+    Serial.println(" sticks saved but board 2 (0x41) not found.");
+  }
+
+  settingsClamp(
+    cfg,
+    availableSticks);
+
+
+  buzzer.setEnabled(cfg.sound);
+
+
+  Serial.print("Sticks: ");
+  Serial.print(cfg.sticks);
+  Serial.print(" of ");
+  Serial.println(availableSticks);
+
+  Serial.print("Mode: ");
+  Serial.println(modeName(cfg.mode));
+
+
+  // ===================================================
+  // FLOOR SENSORS (OPTIONAL)
+  // ===================================================
+
+  if (sensors.begin()) {
+
+    Serial.print("Floor sensors: ");
+    Serial.print(sensors.lanes());
+    Serial.println(" lanes (scoring on)");
+
+  } else {
+
+    Serial.println("Floor sensors: none (no scoring)");
+  }
 
 
   // ===================================================
   // INITIAL SERVO POSITION
   // ===================================================
 
-  resetAllServos();
+  clearLanes();
+
+  delay(500);
+
+  beginReset();
 
 
   // ===================================================
@@ -1057,6 +1861,10 @@ void setup() {
   WiFi.mode(
     WIFI_AP);
 
+  WiFi.softAPConfig(
+    apIP,
+    apIP,
+    IPAddress(255, 255, 255, 0));
 
   WiFi.softAP(
     AP_SSID,
@@ -1064,118 +1872,95 @@ void setup() {
 
 
   Serial.println();
+  Serial.println("WiFi Access Point:");
 
-  Serial.println(
-    "WiFi Access Point:");
+  Serial.print("SSID: ");
+  Serial.println(AP_SSID);
 
+  Serial.print("Password: ");
+  Serial.println(AP_PASSWORD);
 
-  Serial.print(
-    "SSID: ");
-
-  Serial.println(
-    AP_SSID);
-
-
-  Serial.print(
-    "Password: ");
-
-  Serial.println(
-    AP_PASSWORD);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.softAPIP());
 
 
-  Serial.print(
-    "IP address: ");
-
-  Serial.println(
-    WiFi.softAPIP());
+  // Captive portal DNS
+  dnsServer.start(
+    53,
+    "*",
+    apIP);
 
 
   // ===================================================
   // WEB SERVER
   // ===================================================
 
-  server.on(
-    "/",
-    handleRoot);
+  server.on("/", handleRoot);
+  server.on("/start", handleStart);
+  server.on("/stop", handleStop);
+  server.on("/settings", handleSettings);
+  server.on("/servo", handleServoSettings);
+  server.on("/test", handleTestServo);
+  server.on("/trim", handleTrim);
+  server.on("/sticks", handleSticks);
+  server.on("/mode", handleMode);
+  server.on("/sound", handleSound);
+  server.on("/defaults", handleDefaults);
+  server.on("/config", handleConfig);
+  server.on("/state", handleState);
+  server.on("/status", handleStatus);
+
+  server.onNotFound(handleNotFound);
 
 
-  server.on(
-    "/start",
-    handleStart);
-
-
-  server.on(
-    "/stop",
-    handleStop);
-
-
-  server.on(
-    "/settings",
-    handleSettings);
-
-
-  server.on(
-    "/servo",
-    handleServoSettings);
-
-
-  server.on(
-    "/test",
-    handleTestServo);
-
-
-  server.on(
-    "/status",
-    handleStatus);
-
-
-  server.on(
-    "/sticks",
-    handleSticks);
-
-
-  server.on(
-    "/config",
-    handleConfig);
+  // Firmware upload page: http://192.168.4.1/update
+  httpUpdater.setup(
+    &server,
+    "/update",
+    "admin",
+    OTA_PASSWORD);
 
 
   server.begin();
 
 
   Serial.println();
+  Serial.println("Web server started.");
 
-  Serial.println(
-    "Web server started.");
+
+  // ===================================================
+  // WIRELESS UPDATES (PlatformIO / Arduino IDE)
+  // ===================================================
+
+  ArduinoOTA.setHostname("stick-catcher");
+
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+
+  ArduinoOTA.onStart([]() {
+
+    // Park everything before the flash is rewritten
+    gameState = WAITING;
+    buzzer.stop();
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.println("OTA update started...");
+  });
+
+  ArduinoOTA.begin();
 
 
   Serial.println();
-
-  Serial.println(
-    "Connect your phone/laptop to:");
-
-
-  Serial.println(
-    "STICK-CATCHER");
-
+  Serial.println("Connect your phone/laptop to:");
+  Serial.println(AP_SSID);
 
   Serial.println();
-
-  Serial.println(
-    "Then open:");
-
-
-  Serial.println(
-    "http://192.168.4.1");
-
+  Serial.println("Then open:");
+  Serial.println("http://192.168.4.1");
 
   Serial.println();
+  Serial.println("Waiting for physical START button...");
 
-  Serial.println(
-    "Waiting for physical START button...");
-
-
-  Serial.println(
-    "================================");
+  Serial.println("================================");
 }
 
 
@@ -1183,58 +1968,34 @@ void setup() {
 // LOOP
 // =====================================================
 
+// Nothing in here waits: every step checks the time and
+// returns, so web requests are answered during a round.
+
 void loop() {
 
+  unsigned long now = millis();
 
-  // Handle web requests
+
+  dnsServer.processNextRequest();
 
   server.handleClient();
 
-
-  // ===================================================
-  // PHYSICAL START BUTTON
-  // ===================================================
-
-  bool buttonState =
-    digitalRead(
-      START_BUTTON);
+  ArduinoOTA.handle();
 
 
-  // Detect HIGH -> LOW transition
+  readButton(now);
 
-  if (
-    lastButtonState == HIGH && buttonState == LOW) {
+  updateReset(now);
 
+  updateTests(now);
 
-    // Debounce
-
-    delay(30);
+  updateSensors(now);
 
 
-    if (
-      digitalRead(
-        START_BUTTON)
-      == LOW) {
+  gameLoop(now);
 
 
-      // Only start if waiting
+  buzzer.update();
 
-      if (
-        gameState == WAITING) {
-
-        startGame();
-      }
-    }
-  }
-
-
-  lastButtonState =
-    buttonState;
-
-
-  // ===================================================
-  // GAME STATE MACHINE
-  // ===================================================
-
-  gameLoop();
+  updateLed(now);
 }

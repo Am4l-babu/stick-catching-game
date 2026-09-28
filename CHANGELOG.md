@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.0.0
+
+Game modes, saved settings, scoring and room for 32 sticks.
+
+### Firmware
+- **Settings saved to flash.** Stick count, timing, angles, trims, mode and buzzer setting survive a restart (`settings.h`, checksummed, only written when something changes). New `/defaults` endpoint and a **RESTORE DEFAULTS** button. The defaults moved to `settings.h`.
+- **Per-hook trim** (−45° to +45°), added to that hook's HOLD and RELEASE angles. New `/trim` endpoint.
+- **No blocking.** Servo resets, test fires, sounds and the START button debounce are all timed from `loop()` instead of `delay()`, so the web panel answers mid-round. The first drop waits until every hook is back at HOLD.
+- **Game modes:** Classic, Speed-up (gaps ×0.85 per round), Double drop and Marathon (2–20 rounds with a 3–60 s reload pause). New `/mode` endpoint.
+- **Buzzer** on D6 and **status LED** on D7. New `/sound` endpoint.
+- **Floor sensors** (optional): MCP23017 expanders at `0x20`/`0x21` score each stick as caught or missed.
+- **Second PCA9685** at `0x41` is detected at boot and allows up to 32 sticks.
+- **Live `/state` JSON** (lane letters, round, speed, score) for the panel; `/config` also reports mode, trims, boards, sensors and firmware version.
+- **Captive portal.** A DNS server sends every address to the panel, so phones open it on joining.
+- **Wireless updates** through `/update` in the browser and ArduinoOTA (new `nodemcuv2_ota` PlatformIO environment).
+- The panel page is stored in flash (`PROGMEM`) and streamed with `send_P()`: RAM use at boot went from 47% to 40%.
+
+### Web control panel
+- New **🎮 Game Mode**, **🧪 Test & Fine-tune** (trim) and **🔧 Board** cards.
+- A dot per stick shows hanging, dropped, caught or missed; the status card shows mode, round, speed and score.
+- Every phone with the panel open follows the same game and picks up changes made on another phone.
+- Save buttons confirm with a message; changes that need an idle game say *Stop the game first*.
+
+### Servo test sketch
+- Up to 32 servos with a second PCA9685 at `0x41`. The I²C scan names the servo boards and sensor expanders.
+
+### Simulator
+- Mirrors v3: game modes, per-hook trim, up to 32 sticks (catch keys follow the keyboard rows), the non-blocking reset, marathon reload screen, LED indicator and the new phone cards.
+- Settings are kept in the browser. New `?mode=` address option.
+- Hosted on GitHub Pages.
+
+### Project
+- GitHub Actions builds every PlatformIO environment and runs a game logic test (`test/firmware/`) that plays the real firmware against fake hardware.
+
 ## v2.0.0
 
 Choose how many sticks you play with, from 1 to 16.
