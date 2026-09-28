@@ -21,6 +21,8 @@ String getHTML() {
 
 <head>
 
+<meta charset="utf-8">
+
 <meta name="viewport"
 content="width=device-width,initial-scale=1">
 
@@ -146,6 +148,33 @@ button {
 }
 
 
+/* More than 6 sticks: four smaller buttons per row */
+
+.grid.many {
+
+  grid-template-columns: repeat(4, 1fr);
+
+}
+
+
+.grid.many button {
+
+  padding: 12px 0;
+
+}
+
+
+.hint {
+
+  color: #999;
+
+  font-size: 14px;
+
+  margin: 10px 0 0;
+
+}
+
+
 label {
 
   display: block;
@@ -213,6 +242,60 @@ class="stop"
 onclick="stopGame()">
 
 ■ STOP / RESET
+
+</button>
+
+</div>
+
+
+<!-- ============================================ -->
+
+<div class="card">
+
+<h2>🎯 Sticks</h2>
+
+
+<label>
+
+Number of sticks:
+
+<span
+id="sticksValue"
+class="value">
+
+6
+
+</span>
+
+</label>
+
+
+<input
+type="range"
+id="stickCount"
+min="1"
+max="16"
+value="6"
+oninput="
+sticksValue.innerHTML =
+this.value
+">
+
+
+<p
+id="sticksHint"
+class="hint">
+
+Servos on PCA9685 channels 0 to 5.
+
+</p>
+
+
+<button
+class="save"
+onclick="saveSticks()">
+
+💾 SAVE STICK COUNT
 
 </button>
 
@@ -428,62 +511,11 @@ onclick="saveServo()">
 <h2>🧪 Test Individual Servos</h2>
 
 
-<div class="grid">
+<!-- Filled in by buildTestButtons() -->
 
-
-<button
-class="test"
-onclick="testServo(0)">
-
-STICK 1
-
-</button>
-
-
-<button
-class="test"
-onclick="testServo(1)">
-
-STICK 2
-
-</button>
-
-
-<button
-class="test"
-onclick="testServo(2)">
-
-STICK 3
-
-</button>
-
-
-<button
-class="test"
-onclick="testServo(3)">
-
-STICK 4
-
-</button>
-
-
-<button
-class="test"
-onclick="testServo(4)">
-
-STICK 5
-
-</button>
-
-
-<button
-class="test"
-onclick="testServo(5)">
-
-STICK 6
-
-</button>
-
+<div
+class="grid"
+id="tests">
 
 </div>
 
@@ -599,6 +631,176 @@ function testServo(number) {
   );
 
 }
+
+
+// ================================================
+// STICK COUNT
+// ================================================
+
+// One test button per stick, and the channel hint
+
+function buildTestButtons(count) {
+
+  let grid =
+    document.getElementById(
+      'tests'
+    );
+
+
+  grid.innerHTML = '';
+
+  grid.className =
+    count > 6 ? 'grid many' : 'grid';
+
+
+  for (let i = 0; i < count; i++) {
+
+    let b =
+      document.createElement(
+        'button'
+      );
+
+
+    b.className = 'test';
+
+    b.innerHTML =
+      count > 6 ? (i + 1) : 'STICK ' + (i + 1);
+
+    b.onclick = function() {
+      testServo(i);
+    };
+
+
+    grid.appendChild(b);
+  }
+
+
+  document.getElementById(
+    'sticksHint'
+  ).innerHTML =
+    count == 1
+      ? 'Servo on PCA9685 channel 0.'
+      : 'Servos on PCA9685 channels 0 to ' + (count - 1) + '.';
+
+}
+
+
+function setStickSlider(count) {
+
+  document.getElementById(
+    'stickCount'
+  ).value = count;
+
+
+  document.getElementById(
+    'sticksValue'
+  ).innerHTML = count;
+
+}
+
+
+function saveSticks() {
+
+  let count =
+    document.getElementById(
+      'stickCount'
+    ).value;
+
+
+  fetch(
+    '/sticks?count=' +
+    count
+  )
+
+  .then(
+    response =>
+      response.text().then(
+        text => {
+
+          if (!response.ok) {
+
+            alert(
+              'Stick count not changed: ' + text +
+              '. Stop the game first.'
+            );
+
+            loadConfig();
+
+            return;
+          }
+
+
+          setStickSlider(+text);
+
+          buildTestButtons(+text);
+
+        }
+      )
+  );
+
+}
+
+
+// ================================================
+// LOAD CURRENT SETTINGS FROM THE BOARD
+// ================================================
+
+function setSlider(id, valueId, value, unit) {
+
+  document.getElementById(
+    id
+  ).value = value;
+
+
+  document.getElementById(
+    valueId
+  ).innerHTML = value + unit;
+
+}
+
+
+function loadConfig() {
+
+  fetch('/config')
+
+  .then(
+    response => response.json()
+  )
+
+  .then(
+    c => {
+
+      document.getElementById(
+        'stickCount'
+      ).max = c.maxSticks;
+
+
+      setStickSlider(c.sticks);
+
+      buildTestButtons(c.sticks);
+
+
+      setSlider('startDelay', 'startValue', c.start, ' ms');
+
+      setSlider('minDelay', 'minValue', c.min, ' ms');
+
+      setSlider('maxDelay', 'maxValue', c.max, ' ms');
+
+      setSlider('releaseTime', 'releaseValue', c.release, ' ms');
+
+      setSlider('holdAngle', 'holdValue', c.hold, '°');
+
+      setSlider('releaseAngle', 'releaseAngleValue', c.releaseAngle, '°');
+
+    }
+  );
+
+}
+
+
+buildTestButtons(6);
+
+loadConfig();
 
 
 // ================================================
