@@ -97,18 +97,20 @@ a{color:var(--accent2)}
 .hwbtn:disabled{filter:grayscale(.7) brightness(.6);cursor:not-allowed;box-shadow:0 0 0 6px #10182f,0 0 0 8px #263259,0 10px 0 #33463b,0 16px 26px rgba(0,0,0,.55)}
 .hwtxt b{display:block;font-size:14px}
 .hwtxt span{font-size:12px;color:var(--muted);font-family:var(--mono)}
-.keys{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.keys{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
 .key{width:52px;height:56px;border-radius:14px;border:1px solid var(--line);background:#0b1124;color:var(--text);cursor:pointer;font-weight:800;font-size:18px;
   position:relative;transition:transform .08s,background .15s;display:grid;place-items:center;line-height:1}
 .key small{position:absolute;bottom:5px;font-size:8px;letter-spacing:.14em;color:var(--muted);font-weight:700}
 .key::before{content:"";position:absolute;left:8px;right:8px;top:0;height:3px;border-radius:0 0 4px 4px;background:var(--kc)}
 .key:active,.key.hit{transform:translateY(3px);background:#182146}
+.keys.many .key{width:44px;height:50px;font-size:16px}
 .keyhint{width:100%;font-size:12px;color:var(--muted);margin:0}
 
 /* scoreboard */
 .score{padding:18px}
 .score h2,.serial h2,.sim-card h2{margin:0 0 12px;font-size:12px;letter-spacing:.24em;color:var(--muted);font-weight:800}
-.slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.slots{display:grid;grid-template-columns:repeat(var(--cols,6),minmax(0,1fr));gap:10px}
+.slots.dense .v{font-size:15px}
 .slot{background:#0a1022;border:1px solid var(--line);border-radius:14px;padding:10px 10px 12px;position:relative;overflow:hidden;min-width:0}
 .slot::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc)}
 .slot .n{font-size:11px;letter-spacing:.14em;color:var(--muted);font-weight:800;padding-left:6px}
@@ -152,6 +154,7 @@ a{color:var(--accent2)}
 .pb.start{background:#16a34a}.pb.stop{background:#dc2626}.pb.test{background:#2563eb;font-size:15px;padding:12px}.pb.save{background:#9333ea}
 .pgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 .pgrid .pb{margin-top:0}
+.pgrid.many{grid-template-columns:repeat(4,1fr)}
 .pcard label{display:block;margin-top:14px;font-size:15px}
 .pcard input[type=range]{width:100%;accent-color:#9333ea;margin:6px 0 0}
 .val{color:#00ff99;font-weight:700}
@@ -179,10 +182,11 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
 }
 @media (max-width:640px){
   .top{padding-top:16px}.top h1{font-size:20px}
-  .slots{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .slots{grid-template-columns:repeat(var(--mcols,3),minmax(0,1fr))}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .keys{margin-left:0;width:100%;justify-content:space-between}
-  .key{flex:1;width:auto}
+  .keys{justify-content:flex-start}
+  .key,.keys.many .key{flex:0 0 calc((100% - (var(--kcols,6) - 1) * 8px) / var(--kcols,6));width:auto}
   .layout{padding:8px 12px 30px}.top{padding-left:12px;padding-right:12px}
   .sum-card{padding:12px 14px 12px;width:92%;border-radius:18px}
   .sum-card small{font-size:9px}
@@ -223,7 +227,7 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
       </div>
 
       <div class="stage-wrap">
-        <canvas id="stage" width="960" height="520" aria-label="Six servo hooks each holding a stick. Click or press 1 to 6 to catch a falling stick."></canvas>
+        <canvas id="stage" width="960" height="520" aria-label="Servo hooks each holding a stick. Click or press a stick's key to catch it."></canvas>
         <div class="toast" id="toast"></div>
         <div class="summary" id="summary" role="dialog" aria-label="Round summary">
           <div class="sum-card">
@@ -246,7 +250,7 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
           <div class="hwtxt"><b>Physical START button</b><span>D5 · GPIO14 → GND · Space</span></div>
         </div>
         <div class="keys" id="keys"></div>
-        <p class="keyhint">Catch a falling stick by <b>clicking it</b>, tapping a lane, pressing <b>1–6</b>, or hitting the number buttons. <b>Esc</b> = stop / reset.</p>
+        <p class="keyhint">Catch a falling stick by <b>clicking it</b>, tapping a lane, pressing <b id="keyRange">1–6</b>, or hitting the key buttons. <b>Esc</b> = stop / reset.</p>
       </div>
     </div>
 
@@ -291,6 +295,13 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
             <div class="pstatus" aria-live="polite">Status: <span id="status">WAITING</span></div>
             <button class="pb start" id="btnStart">▶ START GAME</button>
             <button class="pb stop" id="btnStop">■ STOP / RESET</button>
+          </div>
+
+          <div class="pcard">
+            <h2>🎯 Sticks</h2>
+            <label>Number of sticks: <span class="val" id="sticksValue">6</span></label>
+            <input type="range" id="stickCount" min="1" max="16" value="6">
+            <p class="note"><span id="sticksHint">Servos on PCA9685 channels 0 to 5.</span> On the real panel you press <b>SAVE STICK COUNT</b>. Change it between rounds.</p>
           </div>
 
           <div class="pcard">
@@ -345,7 +356,8 @@ footer{max-width:1360px;margin:0 auto;padding:0 20px 40px;color:var(--muted);fon
 
 <footer>
   This page is a browser model of the firmware in <a href="https://github.com/Am4l-babu/stick-catching-game/tree/main/stick_catching_game" target="_blank" rel="noopener">stick_catching_game.ino</a>:
-  the same five-state machine, Fisher-Yates shuffle, random gaps, servo release delay, and log messages. Falling physics and servo speed are approximations.
+  the same five-state machine, 1 to 16 sticks, Fisher-Yates shuffle, random gaps, servo release delay, and log messages. Falling physics and servo speed are approximations.
+  Add <code>?sticks=10</code> to the address to start with 10 sticks.
 </footer>
 <div id="err"></div>
 
@@ -360,8 +372,13 @@ window.addEventListener('error', function (e) {
 /* =========================================================
    CONSTANTS
    ========================================================= */
-var N = 6;
+var MAX_STICKS = 16;          // one PCA9685 = 16 channels
+var N = 6;                    // sticks in use (changed from the Sticks card)
+var KEYS = '1234567890QWERTY';  // catch key for each stick
 var W = 960, H = 520;
+var MARGIN = 48;              // stage edge to first/last lane
+var LW = 144;                 // lane width, (W - 2 * MARGIN) / N
+var K = 1;                    // hardware drawing scale, shrinks when lanes get narrow
 var FLOOR_Y = 470;
 var STICK_LEN = 180;
 var LEVER_L = 40;
@@ -375,6 +392,16 @@ var PAL = [
   { base: '#38bdf8', dark: '#1a7db0', light: '#a8e3fd' },
   { base: '#a78bfa', dark: '#6a4fd0', light: '#d3c7fd' }
 ];
+['#f472b6', '#2dd4bf', '#a3e635', '#818cf8', '#fb923c', '#22d3ee', '#e879f9', '#facc15', '#f87171', '#fda4af']
+  .forEach(function (c) { PAL.push({ base: c, dark: mix(c, '#000000', .35), light: mix(c, '#ffffff', .55) }); });
+function mix(a, b, t) {
+  var out = '#';
+  for (var k = 1; k < 7; k += 2) {
+    var v = Math.round(parseInt(a.substr(k, 2), 16) * (1 - t) + parseInt(b.substr(k, 2), 16) * t);
+    out += (v < 16 ? '0' : '') + v.toString(16);
+  }
+  return out;
+}
 var FONT = getComputedStyle(document.body).fontFamily;
 var REDUCE = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -382,11 +409,11 @@ function $(s) { return document.querySelector(s); }
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
 function rad(d) { return d * Math.PI / 180; }
-function laneX(i) { return 120 + i * 144; }
-function pivot(i) { return { x: laneX(i) - 34, y: 112 }; }
+function laneX(i) { return MARGIN + LW * (i + 0.5); }
+function pivot(i) { return { x: laneX(i) - 34 * K, y: 112 }; }
 function tipPos(i, ang) {
   var p = pivot(i), a = rad(ang);
-  return { x: p.x + LEVER_L * Math.cos(a), y: p.y + LEVER_L * Math.sin(a) };
+  return { x: p.x + LEVER_L * K * Math.cos(a), y: p.y + LEVER_L * K * Math.sin(a) };
 }
 
 /* =========================================================
@@ -471,12 +498,8 @@ var goFlash = -9999;
 var lev = [];                    // servo model
 var sticks = [];                 // stick model
 var round = null, lastRound = null, roundSeq = 0;
-var best = { avg: 0, caught: 0 };
+var best = {};
 
-for (var i = 0; i < N; i++) {
-  lev.push({ angle: 0, target: 0 });
-  sticks.push(newStick());
-}
 function newStick() {
   return { state: 'hanging', alpha: 1, armed: true, holdRef: 0, x: 0, y: 0, x0: 0, y0: 0, t0: 0, D: 0, T: 0,
            rot: 0, w: 0, rid: 0, test: false, endAt: 0, botAt: Infinity, rt: 0, fadeAt: 0 };
@@ -484,7 +507,7 @@ function newStick() {
 
 function later(now, ms, fn) { sched.push({ at: now + ms, fn: fn }); }
 
-function setServo(i, a) { lev[i].target = clamp(a, 0, 180); }
+function setServo(i, a) { if (i < N) lev[i].target = clamp(a, 0, 180); }   // i >= N: stick removed
 
 /* resetAllServos(): 100 ms between servos, like the firmware */
 function resetAllServos(now, then) {
@@ -510,6 +533,11 @@ function generateRandomOrder() {
   log('Random order: ' + txt);
 }
 
+/* sticks can be added or removed between rounds, once the last round's sticks are reloaded */
+function canResize() {
+  return state === 'WAITING' && sticks.every(function (st) { return st.state === 'hanging'; });
+}
+
 function allHung() {
   for (var i = 0; i < N; i++) if (sticks[i].state !== 'hanging' || sticks[i].alpha < 1 || !sticks[i].armed) return false;
   return true;
@@ -518,6 +546,7 @@ function allHung() {
 function startGame(now, source) {
   if (state !== 'WAITING') return;
   if (!allHung()) { toast('Reloading sticks…'); return; }
+  if (sched.length) return;                  // firmware is still inside a blocking servo reset
   hideSummary();
   log('');
   banner('START BUTTON PRESSED', 'b');
@@ -577,7 +606,7 @@ function finishRelease(now) {
     if (round) round.releasedAll = true;
     state = 'RESETTING';
     log('');
-    banner('ALL 6 STICKS HAVE FALLEN', 'b');
+    banner('ALL ' + N + ' STICKS HAVE FALLEN', 'b');
     later(now, 500, function (t) {
       resetAllServos(t, function () {
         log('');
@@ -608,7 +637,7 @@ function statusText(now) {
       var el = now - countdownStart, rem = el < S.start ? Math.ceil((S.start - el) / 1000) : 0;
       return 'STARTING IN ' + rem + 's';
     case 'RELEASE_STICK': return 'RELEASING';
-    case 'BETWEEN_STICKS': return 'WAITING - ' + releasedCount + '/6';
+    case 'BETWEEN_STICKS': return 'WAITING - ' + releasedCount + '/' + N;
     case 'RESETTING': return 'RESETTING';
   }
   return state;
@@ -755,63 +784,114 @@ function finalizeRound() {
   var n = caught.length;
   var avg = n ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / n) : 0;
   var fast = n ? Math.min.apply(null, rts) : 0;
-  var grade = 'D';
-  if (n === 6 && avg < 300) grade = 'S';
-  else if (n >= 5) grade = 'A';
-  else if (n === 4) grade = 'B';
-  else if (n >= 2) grade = 'C';
+  // same bands as the six-stick game (6/6, 5/6, 4/6, 2/6) scaled to N
+  var ratio = n / N, grade = 'D';
+  if (n === N && avg < 300) grade = 'S';
+  else if (ratio >= 5 / 6) grade = 'A';
+  else if (ratio >= 4 / 6) grade = 'B';
+  else if (ratio >= 2 / 6) grade = 'C';
   r.summary = { n: n, avg: avg, fast: fast, grade: grade };
 
-  var isNew = false;
-  if (n > best.caught || (n === best.caught && n > 0 && (best.avg === 0 || avg < best.avg))) {
-    if (n >= 1) { best.caught = n; best.avg = avg; isNew = true; saveBest(); }
+  var isNew = false, b = bestFor(N);
+  if (n > b.caught || (n === b.caught && n > 0 && (b.avg === 0 || avg < b.avg))) {
+    if (n >= 1) { best[N] = { caught: n, avg: avg }; isNew = true; saveBest(); }
   }
 
   $('#sumGrade').textContent = grade;
-  $('#sumLine').textContent = n + ' / 6 caught';
+  $('#sumLine').textContent = n + ' / ' + N + ' caught';
   $('#sumSub').textContent = n ? 'average ' + avg + ' ms · fastest ' + fast + ' ms' : 'The sticks got away. Try a lower drop height!';
   $('#sumBadge').innerHTML = isNew ? '<span class="badge-new">★ NEW PERSONAL BEST</span>' : '';
   showSummary();
-  if (n === 6) { confetti(); sfx('perfect'); }
+  if (n === N) { confetti(); sfx('perfect'); }
   renderScore();
   log('');
-  log('Round result: ' + n + '/6 caught' + (n ? ', avg ' + avg + ' ms' : '') + '  [grade ' + grade + ']', 'g');
+  log('Round result: ' + n + '/' + N + ' caught' + (n ? ', avg ' + avg + ' ms' : '') + '  [grade ' + grade + ']', 'g');
 }
 
 /* =========================================================
    PERSISTENCE (best score only, safe if storage is blocked)
    ========================================================= */
+/* best = { "6": { caught, avg }, "10": { ... } } - one record per stick count */
 function loadBest() {
-  try { var v = JSON.parse(localStorage.getItem('stickcatcher.best') || 'null'); if (v) best = v; } catch (e) {}
+  try {
+    var v = JSON.parse(localStorage.getItem('stickcatcher.best.v2') || 'null');
+    if (!v) {                                         // v1 kept a single six-stick record
+      var old = JSON.parse(localStorage.getItem('stickcatcher.best') || 'null');
+      if (old) v = { 6: old };
+    }
+    if (v) best = v;
+  } catch (e) {}
 }
-function saveBest() { try { localStorage.setItem('stickcatcher.best', JSON.stringify(best)); } catch (e) {} }
+function saveBest() { try { localStorage.setItem('stickcatcher.best.v2', JSON.stringify(best)); } catch (e) {} }
+function bestFor(n) { return best[n] || { avg: 0, caught: 0 }; }
 
 /* =========================================================
    UI: scoreboard, toast, summary
    ========================================================= */
-var slotsEl = $('#slots');
-for (var si = 0; si < N; si++) {
-  var sd = document.createElement('div');
-  sd.className = 'slot'; sd.style.setProperty('--kc', PAL[si].base);
-  sd.innerHTML = '<div class="n">STICK ' + (si + 1) + '</div><div class="v">–</div><div class="bar"><i></i></div>';
-  slotsEl.appendChild(sd);
+var slotsEl = $('#slots'), keysEl = $('#keys'), testsEl = $('#tests');
+
+/* scoreboard slots, catch keys and test buttons: one per stick */
+function buildLaneUI() {
+  slotsEl.textContent = ''; keysEl.textContent = ''; testsEl.textContent = '';
+  var cols = N <= 8 ? N : Math.ceil(N / 2);
+  slotsEl.style.setProperty('--cols', cols);
+  slotsEl.style.setProperty('--mcols', N <= 4 ? N : N <= 6 ? 3 : 4);
+  slotsEl.classList.toggle('dense', cols > 6);
+  keysEl.classList.toggle('many', N > 8);
+  keysEl.style.setProperty('--kcols', N <= 8 ? N : Math.ceil(N / 2));   // phone: one row, or two even rows
+  testsEl.classList.toggle('many', N > 6);
+  for (var i = 0; i < N; i++) {
+    var sd = document.createElement('div');
+    sd.className = 'slot'; sd.style.setProperty('--kc', PAL[i].base);
+    sd.innerHTML = '<div class="n">STICK ' + (i + 1) + '</div><div class="v">–</div><div class="bar"><i></i></div>';
+    slotsEl.appendChild(sd);
+
+    var kb = document.createElement('button');
+    kb.className = 'key'; kb.style.setProperty('--kc', PAL[i].base);
+    kb.innerHTML = KEYS[i] + '<small>CATCH</small>';
+    kb.setAttribute('aria-label', 'Catch stick ' + (i + 1) + ' (key ' + KEYS[i] + ')');
+    (function (k) { kb.addEventListener('pointerdown', function (e) { e.preventDefault(); tryCatch(k, performance.now(), false); }); })(i);
+    keysEl.appendChild(kb);
+
+    var tb = document.createElement('button');
+    tb.className = 'pb test'; tb.textContent = N > 6 ? String(i + 1) : 'STICK ' + (i + 1);
+    tb.setAttribute('aria-label', 'Test stick ' + (i + 1));
+    (function (k) { tb.addEventListener('click', function () { testServo(performance.now(), k); }); })(i);
+    testsEl.appendChild(tb);
+  }
+  $('#keyRange').textContent = N === 1 ? '1' : N <= 10 ? '1–' + KEYS[N - 1] : '1–0, Q–' + KEYS[N - 1];
+  $('#sticksValue').textContent = N;
+  $('#sticksHint').textContent = N === 1 ? 'Servo on PCA9685 channel 0.' : 'Servos on PCA9685 channels 0 to ' + (N - 1) + '.';
+  cv.setAttribute('aria-label', N + ' servo hooks each holding a stick. Click a falling stick or press its key (' +
+    $('#keyRange').textContent + ') to catch it.');
 }
-var keysEl = $('#keys');
-for (var ki = 0; ki < N; ki++) {
-  var kb = document.createElement('button');
-  kb.className = 'key'; kb.style.setProperty('--kc', PAL[ki].base);
-  kb.innerHTML = (ki + 1) + '<small>CATCH</small>';
-  kb.setAttribute('aria-label', 'Catch stick ' + (ki + 1));
-  (function (k) { kb.addEventListener('pointerdown', function (e) { e.preventDefault(); tryCatch(k, performance.now(), false); }); })(ki);
-  keysEl.appendChild(kb);
+
+/* Sticks card: add or remove hooks between rounds, like /sticks?count= on the board */
+function setStickCount(n, now, quiet) {
+  n = clamp(Math.round(n) || 6, 1, MAX_STICKS);
+  if (n === N && lev.length === N) return;
+  N = n;
+  LW = (W - 2 * MARGIN) / N;
+  K = Math.min(1, LW / 144);
+  while (lev.length < N) {                  // added hooks fade in already loaded
+    lev.push({ angle: S.hold, target: S.hold });
+    var st = newStick();
+    st.holdRef = S.hold; st.alpha = quiet ? 1 : 0; st.fadeAt = now;
+    sticks.push(st);
+  }
+  lev.length = N; sticks.length = N; padFlash.length = Math.min(padFlash.length, N);
+  round = null; lastRound = null;
+  hideSummary();
+  $('#stickCount').value = N;
+  buildLaneUI();
+  renderScore();
+  if (!quiet) {
+    log('');
+    log('Stick count updated: ' + N);
+    resetAllServos(now);
+  }
 }
-var testsEl = $('#tests');
-for (var ti = 0; ti < N; ti++) {
-  var tb = document.createElement('button');
-  tb.className = 'pb test'; tb.textContent = 'STICK ' + (ti + 1);
-  (function (k) { tb.addEventListener('click', function () { testServo(performance.now(), k); }); })(ti);
-  testsEl.appendChild(tb);
-}
+
 function keyFlash(i) {
   var el = keysEl.children[i];
   el.classList.add('hit'); setTimeout(function () { el.classList.remove('hit'); }, 120);
@@ -834,10 +914,11 @@ function renderScore() {
     else if (r.s === 'jam') { el.classList.add('jam'); vEl.textContent = 'JAM'; bar.style.width = '0'; }
   }
   var have = v && v.res.some(function (x) { return x.s !== 'pending'; });
-  $('#stCaught').textContent = have ? caughtN + ' / 6' : '–';
+  $('#stCaught').textContent = have ? caughtN + ' / ' + N : '–';
   $('#stAvg').textContent = rts.length ? Math.round(rts.reduce(function (a, b) { return a + b; }, 0) / rts.length) + ' ms' : '–';
   $('#stFast').textContent = rts.length ? Math.min.apply(null, rts) + ' ms' : '–';
-  $('#stBest').textContent = best.caught ? best.avg + ' ms · ' + best.caught + '/6' : '–';
+  var b = bestFor(N);
+  $('#stBest').textContent = b.caught ? b.avg + ' ms · ' + b.caught + '/' + N : '–';
 }
 
 var toastTimer = 0;
@@ -873,7 +954,7 @@ function confetti() {
                  c: cols[k % 6], s: 4 + Math.random() * 5, g: 90, shape: 'r', rot: Math.random() * 6, vr: (Math.random() - .5) * 10 });
   }
 }
-function floater(x, y, text, color, now, size) { floaters.push({ x: x, y: y, text: text, c: color, t0: now, size: size || 22 }); }
+function floater(x, y, text, color, now, size) { floaters.push({ x: x, y: y, text: text, c: color, t0: now, size: Math.round((size || 22) * Math.max(K, .65)) }); }
 function ring(x, y, color, now) { rings.push({ x: x, y: y, c: color, t0: now }); }
 function bump(px) { if (!REDUCE) shake = Math.max(shake, px); }
 
@@ -903,10 +984,11 @@ function drawBackdrop(now) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 
   // soft lane glows
+  var gr = Math.min(190, LW * 1.32), gw = Math.min(110, LW * .76);
   for (var i = 0; i < N; i++) {
-    var rg = ctx.createRadialGradient(laneX(i) + 6, 300, 10, laneX(i) + 6, 300, 190);
+    var rg = ctx.createRadialGradient(laneX(i) + 6, 300, 10, laneX(i) + 6, 300, gr);
     rg.addColorStop(0, PAL[i].base + '1c'); rg.addColorStop(1, 'transparent');
-    ctx.fillStyle = rg; ctx.fillRect(laneX(i) - 100, 110, 220, 380);
+    ctx.fillStyle = rg; ctx.fillRect(laneX(i) + 10 - gw, 110, 2 * gw, 380);
   }
 
   // dashed lane guides
@@ -929,16 +1011,17 @@ function drawBackdrop(now) {
   ctx.shadowBlur = 0;
 
   // lane pads
+  var pw = Math.min(112, LW * .78);
   for (var k = 0; k < N; k++) {
     var x = tipPos(k, S.hold).x, f = padFlash[k], a = 0;
     if (f) { a = clamp(1 - (now - f.t) / 500, 0, 1); }
     ctx.fillStyle = '#10183a';
-    rr(x - 56, FLOOR_Y + 12, 112, 30, 10); ctx.fill();
+    rr(x - pw / 2, FLOOR_Y + 12, pw, 30, 10); ctx.fill();
     ctx.strokeStyle = PAL[k].base + '66'; ctx.lineWidth = 1.5; ctx.stroke();
-    if (a > 0) { ctx.globalAlpha = a * .7; ctx.fillStyle = f.c; rr(x - 56, FLOOR_Y + 12, 112, 30, 10); ctx.fill(); ctx.globalAlpha = 1; }
+    if (a > 0) { ctx.globalAlpha = a * .7; ctx.fillStyle = f.c; rr(x - pw / 2, FLOOR_Y + 12, pw, 30, 10); ctx.fill(); ctx.globalAlpha = 1; }
     ctx.fillStyle = PAL[k].base; ctx.font = '800 15px ' + FONT;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('KEY ' + (k + 1), x, FLOOR_Y + 27);
+    ctx.fillText(pw >= 90 ? 'KEY ' + KEYS[k] : KEYS[k], x, FLOOR_Y + 27);
   }
 }
 
@@ -954,32 +1037,42 @@ function drawRail() {
 }
 
 function drawServo(i, now) {
-  var p = pivot(i), l = lev[i], col = PAL[i];
+  var p = pivot(i), l = lev[i], col = PAL[i], hk = Math.max(K, .6);
   // body
+  var bx = p.x - 30 * K, bw = 84 * K;
   var g = ctx.createLinearGradient(0, 58, 0, 104);
   g.addColorStop(0, '#26305c'); g.addColorStop(1, '#141b38');
-  ctx.fillStyle = g; rr(p.x - 30, 58, 84, 46, 8); ctx.fill();
+  ctx.fillStyle = g; rr(bx, 58, bw, 46, 8 * hk); ctx.fill();
   ctx.strokeStyle = '#3a4880'; ctx.lineWidth = 1.5; ctx.stroke();
-  ctx.fillStyle = col.base; rr(p.x - 30, 58, 84, 5, 3); ctx.fill();
-  ctx.fillStyle = '#c3cbef'; ctx.font = '800 12px ui-monospace,Consolas,monospace';
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText('SERVO ' + (i + 1), p.x - 22, 78);
-  ctx.fillStyle = '#7f8bb8'; ctx.font = '700 10px ui-monospace,Consolas,monospace';
-  ctx.fillText('CH' + i + '  ' + Math.round(l.angle) + '°', p.x - 22, 93);
+  ctx.fillStyle = col.base; rr(bx, 58, bw, 5, 3); ctx.fill();
+  ctx.textBaseline = 'middle';
+  if (K >= .8) {
+    ctx.fillStyle = '#c3cbef'; ctx.font = '800 12px ui-monospace,Consolas,monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('SERVO ' + (i + 1), p.x - 22 * K, 78);
+    ctx.fillStyle = '#7f8bb8'; ctx.font = '700 10px ui-monospace,Consolas,monospace';
+    ctx.fillText('CH' + i + '  ' + Math.round(l.angle) + '°', p.x - 22 * K, 93);
+  } else {                                  // narrow lanes: number + angle only
+    ctx.fillStyle = '#c3cbef'; ctx.font = '800 12px ui-monospace,Consolas,monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(i + 1), bx + bw / 2, 76);
+    ctx.fillStyle = '#7f8bb8'; ctx.font = '700 9px ui-monospace,Consolas,monospace';
+    ctx.fillText(Math.round(l.angle) + '°', bx + bw / 2, 92);
+  }
   // horn
   var t = tipPos(i, l.angle);
   ctx.lineCap = 'round';
-  ctx.strokeStyle = '#0a0f22'; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+  ctx.strokeStyle = '#0a0f22'; ctx.lineWidth = 10 * hk; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
   var hg = ctx.createLinearGradient(p.x, p.y, t.x, t.y);
   hg.addColorStop(0, '#e6ebff'); hg.addColorStop(1, '#8b97c9');
-  ctx.strokeStyle = hg; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
-  ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(t.x, t.y, 4.5, 0, 6.283); ctx.fill();
-  ctx.fillStyle = '#e6ebff'; ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 6.283); ctx.fill();
-  ctx.fillStyle = col.base; ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, 6.283); ctx.fill();
+  ctx.strokeStyle = hg; ctx.lineWidth = 6 * hk; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+  ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(t.x, t.y, 4.5 * hk, 0, 6.283); ctx.fill();
+  ctx.fillStyle = '#e6ebff'; ctx.beginPath(); ctx.arc(p.x, p.y, 8 * hk, 0, 6.283); ctx.fill();
+  ctx.fillStyle = col.base; ctx.beginPath(); ctx.arc(p.x, p.y, 3.5 * hk, 0, 6.283); ctx.fill();
 }
 
 function drawStickShape(i, x, top, alpha, rot, about, glow, scaleK) {
-  var col = PAL[i];
+  var col = PAL[i], hw = 9 * Math.max(K, .55);   // half stick width
   ctx.save();
   ctx.globalAlpha = alpha;
   var ox = x, oy = about === 'ring' ? top : top + 6 + STICK_LEN / 2;
@@ -989,15 +1082,15 @@ function drawStickShape(i, x, top, alpha, rot, about, glow, scaleK) {
   ctx.translate(-ox, -oy);
   if (glow) { ctx.shadowColor = col.base; ctx.shadowBlur = 26; }
   // ring
-  ctx.strokeStyle = '#d7dcef'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, top, 6, 0, 6.283); ctx.stroke();
+  ctx.strokeStyle = '#d7dcef'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, top, 6 * Math.max(K, .7), 0, 6.283); ctx.stroke();
   // body
-  var g = ctx.createLinearGradient(x - 9, 0, x + 9, 0);
+  var g = ctx.createLinearGradient(x - hw, 0, x + hw, 0);
   g.addColorStop(0, col.dark); g.addColorStop(.4, col.base); g.addColorStop(.55, col.light); g.addColorStop(1, col.dark);
-  ctx.fillStyle = g; rr(x - 9, top + 6, 18, STICK_LEN, 8); ctx.fill();
+  ctx.fillStyle = g; rr(x - hw, top + 6, 2 * hw, STICK_LEN, Math.min(8, hw)); ctx.fill();
   ctx.shadowBlur = 0;
   // bands
   ctx.fillStyle = 'rgba(255,255,255,.28)';
-  for (var b = 0; b < 3; b++) ctx.fillRect(x - 9, top + 60 + b * 40, 18, 5);
+  for (var b = 0; b < 3; b++) ctx.fillRect(x - hw, top + 60 + b * 40, 2 * hw, 5);
   // badge
   ctx.fillStyle = 'rgba(8,12,26,.78)'; ctx.beginPath(); ctx.arc(x, top + 32, 8, 0, 6.283); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.font = '800 11px ui-monospace,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1119,8 +1212,8 @@ function frame(now) {
   if (s !== lastStatus) { lastStatus = s; $('#status').textContent = s; }
   var pill = $('#statePill');
   if (pill.getAttribute('data-s') !== state) { pill.setAttribute('data-s', state); $('#stateName').textContent = state; }
-  var busy = state !== 'WAITING' || !allHung();
-  $('#hwStart').disabled = busy; $('#btnStart').disabled = busy;
+  var busy = state !== 'WAITING' || !allHung() || sched.length > 0;
+  $('#hwStart').disabled = busy; $('#btnStart').disabled = busy; $('#stickCount').disabled = !canResize();
   requestAnimationFrame(frame);
 }
 
@@ -1139,15 +1232,16 @@ cv.addEventListener('pointerdown', function (e) {
   var r = cv.getBoundingClientRect();
   var x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
   if (y < 60 || y > FLOOR_Y + 60) return;
-  var best = -1, bd = 1e9;
-  for (var i = 0; i < N; i++) { var d = Math.abs(x - tipPos(i, S.hold).x); if (d < bd) { bd = d; best = i; } }
-  if (bd < 72) tryCatch(best, performance.now(), false);
+  var lane = -1, bd = 1e9;
+  for (var i = 0; i < N; i++) { var d = Math.abs(x - tipPos(i, S.hold).x); if (d < bd) { bd = d; lane = i; } }
+  if (bd < Math.min(72, LW / 2)) tryCatch(lane, performance.now(), false);
 });
 
 document.addEventListener('keydown', function (e) {
   var tag = (e.target && e.target.tagName) || '';
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key >= '1' && e.key <= '6' && tag !== 'INPUT') { tryCatch(+e.key - 1, performance.now(), false); e.preventDefault(); }
+  var lane = e.key.length === 1 ? KEYS.indexOf(e.key.toUpperCase()) : -1;
+  if (lane >= 0 && lane < N && tag !== 'INPUT') { tryCatch(lane, performance.now(), false); e.preventDefault(); }
   else if (e.key === ' ' && (tag === 'BODY' || tag === 'CANVAS')) { e.preventDefault(); if (!e.repeat) { $('#hwStart').classList.add('down'); pressStart(); } }
   else if (e.key === 'Escape') { stopGame(performance.now()); }
 });
@@ -1179,6 +1273,10 @@ $('#releaseAngle').addEventListener('change', function () { log(''); log('Servo 
     log('Start delay: ' + S.start); log('Min delay: ' + S.min); log('Max delay: ' + S.max); log('Release time: ' + S.release);
   });
 });
+$('#stickCount').addEventListener('input', function () {
+  if (!canResize()) { $('#stickCount').value = N; toast('GAME RUNNING'); return; }
+  setStickCount(+$('#stickCount').value, performance.now());
+});
 $('#dropHeight').addEventListener('input', function () {
   $('#dropOut').textContent = S.height + ' cm';
   $('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
@@ -1196,11 +1294,14 @@ soundBtn.addEventListener('click', function () {
    BOOT
    ========================================================= */
 loadBest();
+var qs = /[?&]sticks=(\d+)/.exec(location.search);
+setStickCount(qs ? +qs[1] : 6, performance.now(), true);
 resize();
 if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
 $('#fallPill').textContent = 'fall time · ' + S.fallT.toFixed(2) + ' s';
 
 banner('       STICK CATCHER', 'b');
+log('Sticks: ' + N + ' of ' + MAX_STICKS);
 log('');
 log('Resetting all servos...');
 log('All servos at HOLD position.');

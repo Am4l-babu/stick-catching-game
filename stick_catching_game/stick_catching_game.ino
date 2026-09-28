@@ -21,21 +21,21 @@ ESP8266WebServer server(80);
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 
+// One PCA9685 has 16 channels, so up to 16 sticks.
+//
 // PCA9685 channels
-// Servo 1 = CH0
-// Servo 2 = CH1
-// Servo 3 = CH2
-// Servo 4 = CH3
-// Servo 5 = CH4
-// Servo 6 = CH5
+// Servo 1  = CH0
+// Servo 2  = CH1
+// ...
+// Servo 16 = CH15
 
-const uint8_t servoChannel[6] = {
-  0,
-  1,
-  2,
-  3,
-  4,
-  5
+const int MAX_STICKS = 16;
+
+const uint8_t servoChannel[MAX_STICKS] = {
+  0, 1, 2, 3,
+  4, 5, 6, 7,
+  8, 9, 10, 11,
+  12, 13, 14, 15
 };
 
 
@@ -110,11 +110,16 @@ GameState gameState = WAITING;
 // GAME VARIABLES
 // =====================================================
 
-// Number of sticks
-const int TOTAL_STICKS = 6;
+// Sticks used when the board powers up.
+// Set this to the number of servos you built (1 to MAX_STICKS).
+// It can also be changed from the web panel.
+const int DEFAULT_STICKS = 6;
 
-// Randomized order
-int stickOrder[TOTAL_STICKS];
+// Number of sticks in use (servos on CH0 .. CH stickCount-1)
+int stickCount = DEFAULT_STICKS;
+
+// Randomized order (first stickCount entries are used)
+int stickOrder[MAX_STICKS];
 
 // Number already released
 int releasedCount = 0;
@@ -160,7 +165,7 @@ uint16_t angleToPulse(int angle) {
 
 void setServoAngle(int stick, int angle) {
 
-  if (stick < 0 || stick >= TOTAL_STICKS) {
+  if (stick < 0 || stick >= MAX_STICKS) {
     return;
   }
 
@@ -182,7 +187,7 @@ void resetAllServos() {
   Serial.println();
   Serial.println("Resetting all servos...");
 
-  for (int i = 0; i < TOTAL_STICKS; i++) {
+  for (int i = 0; i < stickCount; i++) {
 
     setServoAngle(
       i,
@@ -203,9 +208,9 @@ void generateRandomOrder() {
 
   // Start with:
   //
-  // 0 1 2 3 4 5
+  // 0 1 2 ... stickCount-1
 
-  for (int i = 0; i < TOTAL_STICKS; i++) {
+  for (int i = 0; i < stickCount; i++) {
 
     stickOrder[i] = i;
   }
@@ -215,7 +220,7 @@ void generateRandomOrder() {
   //
   // Ensures every stick is used exactly once.
 
-  for (int i = TOTAL_STICKS - 1; i > 0; i--) {
+  for (int i = stickCount - 1; i > 0; i--) {
 
     int j = random(
       0,
@@ -232,12 +237,12 @@ void generateRandomOrder() {
   // Serial monitor
   Serial.print("Random order: ");
 
-  for (int i = 0; i < TOTAL_STICKS; i++) {
+  for (int i = 0; i < stickCount; i++) {
 
     Serial.print(
       stickOrder[i] + 1);
 
-    if (i < TOTAL_STICKS - 1) {
+    if (i < stickCount - 1) {
       Serial.print(" -> ");
     }
   }
@@ -323,7 +328,7 @@ void stopGame() {
 void releaseCurrentStick() {
 
   // Safety
-  if (releasedCount >= TOTAL_STICKS) {
+  if (releasedCount >= stickCount) {
 
     gameState = RESETTING;
 
@@ -359,8 +364,8 @@ void releaseCurrentStick() {
   //
   // We DON'T return the servo to 0° here.
   //
-  // It remains at release position until all 6
-  // sticks have fallen.
+  // It remains at release position until every
+  // stick has fallen.
   // ---------------------------------------------------
 
 
@@ -370,14 +375,14 @@ void releaseCurrentStick() {
   Serial.print("Released: ");
   Serial.print(releasedCount);
   Serial.print("/");
-  Serial.println(TOTAL_STICKS);
+  Serial.println(stickCount);
 
 
   // ---------------------------------------------------
   // If all sticks are released
   // ---------------------------------------------------
 
-  if (releasedCount >= TOTAL_STICKS) {
+  if (releasedCount >= stickCount) {
 
     gameState = RESETTING;
 
@@ -415,7 +420,9 @@ void resetAfterGame() {
 
   Serial.println();
   Serial.println("================================");
-  Serial.println("ALL 6 STICKS HAVE FALLEN");
+  Serial.print("ALL ");
+  Serial.print(stickCount);
+  Serial.println(" STICKS HAVE FALLEN");
   Serial.println("================================");
 
 
@@ -749,7 +756,7 @@ void handleTestServo() {
 
 
   if (
-    servo < 0 || servo >= TOTAL_STICKS) {
+    servo < 0 || servo >= stickCount) {
 
     server.send(
       400,
@@ -798,6 +805,92 @@ void handleTestServo() {
     200,
     "text/plain",
     "SERVO TESTED");
+}
+
+
+// =====================================================
+// WEB STICK COUNT
+// =====================================================
+
+void handleSticks() {
+
+
+  if (!server.hasArg("count")) {
+
+    server.send(
+      400,
+      "text/plain",
+      "NO COUNT");
+
+    return;
+  }
+
+
+  // The shuffled order is built for the current
+  // count, so only change it between rounds
+
+  if (gameState != WAITING) {
+
+    server.send(
+      409,
+      "text/plain",
+      "GAME RUNNING");
+
+    return;
+  }
+
+
+  stickCount =
+    constrain(
+      server.arg("count").toInt(),
+      1,
+      MAX_STICKS);
+
+
+  Serial.println();
+  Serial.print("Stick count updated: ");
+  Serial.println(stickCount);
+
+
+  // Move any newly added hooks to HOLD
+
+  resetAllServos();
+
+
+  server.send(
+    200,
+    "text/plain",
+    String(stickCount));
+}
+
+
+// =====================================================
+// WEB CONFIG
+// =====================================================
+
+// Current settings as JSON, so the control panel
+// shows what the board is really using.
+
+void handleConfig() {
+
+  String json = "{";
+
+  json += "\"sticks\":" + String(stickCount);
+  json += ",\"maxSticks\":" + String(MAX_STICKS);
+  json += ",\"start\":" + String(startDelay);
+  json += ",\"min\":" + String(minDelay);
+  json += ",\"max\":" + String(maxDelay);
+  json += ",\"release\":" + String(releaseTime);
+  json += ",\"hold\":" + String(holdAngle);
+  json += ",\"releaseAngle\":" + String(releaseAngle);
+
+  json += "}";
+
+
+  server.send(
+    200,
+    "application/json",
+    json);
 }
 
 
@@ -856,7 +949,7 @@ void handleStatus() {
     case BETWEEN_STICKS:
 
       status =
-        "WAITING - " + String(releasedCount) + "/6";
+        "WAITING - " + String(releasedCount) + "/" + String(stickCount);
 
       break;
 
@@ -893,6 +986,11 @@ void setup() {
   Serial.println("================================");
   Serial.println("       STICK CATCHER");
   Serial.println("================================");
+
+  Serial.print("Sticks: ");
+  Serial.print(stickCount);
+  Serial.print(" of ");
+  Serial.println(MAX_STICKS);
 
 
   // ===================================================
@@ -1029,6 +1127,16 @@ void setup() {
   server.on(
     "/status",
     handleStatus);
+
+
+  server.on(
+    "/sticks",
+    handleSticks);
+
+
+  server.on(
+    "/config",
+    handleConfig);
 
 
   server.begin();
