@@ -20,13 +20,13 @@ The ESP8266 creates its own Wi-Fi network, so you can start the game, pick a gam
 > **Versions.** This is **v3**: game modes, settings saved to flash, per-hook trim, buzzer and LED, optional floor sensors for scoring, up to 32 sticks, wireless updates. The working six-stick version is tagged [**`v1.0.0`**](https://github.com/Am4l-babu/stick-catching-game/tree/v1.0.0). See the [changelog](CHANGELOG.md).
 
 <p align="center">
-  <a href="https://am4l-babu.github.io/stick-catching-game/">
+  <a href="https://am4l-babu.github.io/stick-catching-game/simulator.html">
     <img src="docs/simulator-preview.png" alt="Stick Catcher browser simulator: ten servo hooks dropping glowing sticks, a phone-style control panel with live lane dots, and a scoreboard" width="900">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://am4l-babu.github.io/stick-catching-game/"><b>▶ Play the simulator in your browser</b></a> · no hardware needed
+  <a href="https://am4l-babu.github.io/stick-catching-game/simulator.html"><b>▶ Play the simulator in your browser</b></a> · no hardware needed
 </p>
 
 ---
@@ -60,7 +60,7 @@ The ESP8266 creates its own Wi-Fi network, so you can start the game, pick a gam
 
 ## 🕹 Try it in your browser
 
-Want to see the game before you build it? Open the **[interactive simulator](https://am4l-babu.github.io/stick-catching-game/)**. It is a single self-contained page ([`docs/simulator.html`](docs/simulator.html)) that runs the same state machine as the firmware, so what you see matches what the hardware does.
+Want to see the game before you build it? Open the **[interactive simulator](https://am4l-babu.github.io/stick-catching-game/simulator.html)**. It is a single self-contained page ([`docs/simulator.html`](docs/simulator.html)) that runs the same state machine as the firmware, so what you see matches what the hardware does.
 
 | | |
 | --- | --- |
@@ -83,7 +83,7 @@ Your settings are kept in your browser, the way the board keeps them in flash. A
 | `mode` | `?mode=marathon` | Start in a mode: `classic`, `speedup`, `double` or `marathon` |
 | `demo` | `?demo=1` | The bot plays a round by itself |
 
-They combine: <https://am4l-babu.github.io/stick-catching-game/?demo=1&sticks=16&mode=double>. You can also open `docs/simulator.html` straight from your disk.
+They combine: <https://am4l-babu.github.io/stick-catching-game/simulator.html?demo=1&sticks=16&mode=double>. You can also open `docs/simulator.html` straight from your disk.
 
 ---
 
