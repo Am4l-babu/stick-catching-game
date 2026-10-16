@@ -25,3 +25,4 @@ Thumbs.db
 # Game logic test binary (test/firmware)
 test_game
 test_game.exe
+stick_catching_game/*.ino.cpp
