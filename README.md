@@ -52,6 +52,7 @@ The ESP8266 creates its own Wi-Fi network, so you can start the game, pick a gam
 - [How it works](#-how-it-works)
 - [HTTP API](#-http-api)
 - [Tests and CI](#-tests-and-ci)
+- [Hardware bring-up checklist](docs/HARDWARE_CHECKLIST.md)
 - [Project structure](#-project-structure)
 - [Troubleshooting](#-troubleshooting)
 - [License](#-license)
@@ -527,6 +528,12 @@ g++ -std=c++17 -I test/firmware -I stick_catching_game test/firmware/test_game.c
 ./test_game
 ```
 
+None of this touches real hardware. The first time you flash v3 onto a
+board, work through **[docs/HARDWARE_CHECKLIST.md](docs/HARDWARE_CHECKLIST.md)**
+— it walks through settings persistence, every game mode, the wireless
+update and the optional second board / floor sensors, in an order where
+each step explains the next one if it fails.
+
 ---
 
 ## 📁 Project structure
@@ -547,7 +554,8 @@ stick-catching-game/
 ├── docs/                           ← GitHub Pages site
 │   ├── index.html                  ← opens the simulator
 │   ├── simulator.html              ← interactive browser simulator
-│   └── simulator-preview.png       ← screenshot used in this README
+│   ├── simulator-preview.png       ← screenshot used in this README
+│   └── HARDWARE_CHECKLIST.md       ← step-by-step first-flash test plan
 ├── .github/workflows/build.yml     ← CI: builds + logic test
 ├── platformio.ini                  ← PlatformIO build config (VS Code / CLI)
 ├── .vscode/
